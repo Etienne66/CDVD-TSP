@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from loss.ssim import MS_SSIM_LOSS
 
 class Loss(nn.modules.loss._Loss):
     def __init__(self, args, ckp):
@@ -28,6 +29,8 @@ class Loss(nn.modules.loss._Loss):
                 loss_function = nn.L1Loss()
             elif loss_type == 'HEM':
                 loss_function = HEM(device=device)
+            elif loss_type == 'MSL':
+                loss_function = MS_SSIM_LOSS(data_range=args.rgb_range, channel=args.n_channel)
             elif loss_type.find('VGG') >= 0:
                 module = import_module('loss.vgg')
                 loss_function = getattr(module, 'VGG')()
@@ -74,12 +77,18 @@ class Loss(nn.modules.loss._Loss):
                 effective_loss = l['weight'] * loss
                 losses.append(effective_loss)
                 self.log[-1, i] += effective_loss.item()
+                #self.log[-1, i, 0] += loss.item()
+                #self.log[-1, i, 1] = l['weight']
             elif l['type'] == 'DIS':
                 self.log[-1, i] += self.loss[i - 1]['function'].loss
+                #self.log[-1, i, 0] += self.loss[i - 1]['function'].loss
+                #self.log[-1, i, 1] = l['weight']
 
         loss_sum = sum(losses)
         if len(self.loss) > 1:
             self.log[-1, -1] += loss_sum.item()
+            #self.log[-1, -1, 0] += loss_sum.item()
+            #self.log[-1, -1, 1] = 0
 
         return loss_sum
 
@@ -90,6 +99,7 @@ class Loss(nn.modules.loss._Loss):
 
     def start_log(self):
         self.log = torch.cat((self.log, torch.zeros(1, len(self.loss))))
+        #self.log = torch.cat((self.log, torch.zeros(1, len(self.loss), 1)))
 
     def end_log(self, n_batches):
         self.log[-1].div_(n_batches)
@@ -98,6 +108,9 @@ class Loss(nn.modules.loss._Loss):
         n_samples = batch + 1
         log = []
         for l, c in zip(self.loss, self.log[-1]):
+            if l['type'] == 'MSL':
+                log.append('[{}: {:.6f}]'.format('MS-SSIM', 1 - c / (n_samples * l['weight'])))
+
             log.append('[{}: {:.6f}]'.format(l['type'], c / n_samples))
 
         return ''.join(log)
@@ -106,7 +119,7 @@ class Loss(nn.modules.loss._Loss):
         if epoch > 1:
             axis = np.linspace(1, epoch, epoch)
             fig = plt.figure()
-            plt.title('L1 & HEM Loss')
+            plt.title('Loss Functions')
             for i, l in enumerate(self.loss):
                 label = '{} Loss'.format(l['type'])
                 plt.plot(axis, self.log[:, i].numpy(), label=label)
@@ -117,6 +130,22 @@ class Loss(nn.modules.loss._Loss):
             #plt.savefig('{}/loss_loss_{}.pdf'.format(apath, l['type']))
             plt.savefig('{}/loss.pdf'.format(apath))
             plt.close(fig)
+        # Print the losses without weights
+            axis = np.linspace(1, epoch, epoch)
+            fig = plt.figure()
+            plt.title('Loss Functions without weights')
+            for i, l in enumerate(self.loss):
+                if l['type'] != 'Total':
+                    label = '{} Loss'.format(l['type'])
+                    plt.plot(axis, self.log[:, i].numpy()/l['weight'], label=label)
+            plt.legend()
+            plt.xlabel('Epochs')
+            plt.ylabel('Loss')
+            plt.grid(True)
+            #plt.savefig('{}/loss_loss_{}.pdf'.format(apath, l['type']))
+            plt.savefig('{}/loss_clean.pdf'.format(apath))
+            plt.close(fig)
+
 
     def get_loss_module(self):
         if self.n_GPUs == 1:
@@ -142,3 +171,4 @@ class Loss(nn.modules.loss._Loss):
         for l in self.loss_module:
             if hasattr(l, 'scheduler'):
                 for _ in range(len(self.log)): l.scheduler.step()
+

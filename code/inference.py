@@ -74,22 +74,11 @@ class Inference:
                 video_psnr = []
                 video_ssim = []
                 input_frames = sorted(glob.glob(os.path.join(self.input_path, v, "*")))
-                len_frames = len(input_frames)
-                temp_frames = [input_frames[3], input_frames[2]] + input_frames\
-                              + [input_frames[len_frames-1], input_frames[len_frames-2]]
-                input_frames = temp_frames
-                input_seqs = self.gene_seq(input_frames, n_seq=self.n_seq)
                 gt_frames = sorted(glob.glob(os.path.join(self.GT_path, v, "*")))
-                del temp_frames
-                del len_frames
+
                 if len(gt_frames) != 0:
-                    len_frames = len(gt_frames)
-                    temp_frames = [gt_frames[3], gt_frames[2]] + gt_frames\
-                                  + [gt_frames[len_frames-1], gt_frames[len_frames-2]]
-                    gt_frames = temp_frames
+                    input_seqs = self.gene_seq(input_frames, n_seq=self.n_seq)
                     gt_seqs = self.gene_seq(gt_frames, n_seq=self.n_seq)
-                    del temp_frames
-                    del len_frames
 
                     for in_seq, gt_seq in zip(input_seqs, gt_seqs):
                         start_time = time.time()
@@ -128,6 +117,14 @@ class Inference:
                                         postprocess_time - forward_time,
                                         postprocess_time - start_time))
                 else:      
+                    len_frames = len(input_frames)
+                    temp_frames = [input_frames[3], input_frames[2]] + input_frames\
+                                  + [input_frames[len_frames-1], input_frames[len_frames-2]]
+                    input_frames = temp_frames
+                    input_seqs = self.gene_seq(input_frames, n_seq=self.n_seq)
+                    del temp_frames
+                    del len_frames
+
                     for in_seq in input_seqs:
                         start_time = time.time()
                         filename = os.path.basename(in_seq[self.n_seq // 2]).split('.')[0]
@@ -217,6 +214,7 @@ class Inference:
             return float('inf')
         return 20 * math.log10(255.0 / math.sqrt(mse))
 
+#https://cvnote.ddlee.cc/2019/09/12/psnr-ssim-python
     def calc_SSIM(self, img1, img2):
         '''calculate SSIM
         the same outputs as MATLAB's

@@ -4,17 +4,25 @@ import model.blocks as blocks
 
 
 def make_model(args):
-    return RECONS_VIDEO(in_channels=args.n_colors,
-                        n_sequence=args.n_sequence,
-                        out_channels=args.n_colors,
-                        n_resblock=args.n_resblock,
-                        n_feat=args.n_feat)
+    return RECONS_VIDEO(in_channels  = args.n_colors,
+                        n_sequence   = args.n_sequence,
+                        out_channels = args.n_colors,
+                        n_resblock   = args.n_resblock,
+                        n_feat       = args.n_feat)
 
 
 class RECONS_VIDEO(nn.Module):
 
-    def __init__(self, in_channels=3, n_sequence=3, out_channels=3, n_resblock=3, n_feat=32,
-                 kernel_size=5, extra_channels=0, feat_in=False, n_in_feat=1):
+    def __init__(self,
+                 in_channels    = 3,
+                 n_sequence     = 3,
+                 out_channels   = 3,
+                 n_resblock     = 3,
+                 n_feat         = 32,
+                 kernel_size    = 5,
+                 extra_channels = 0,
+                 feat_in        = False,
+                 n_in_feat      = 1):
         super(RECONS_VIDEO, self).__init__()
         print("Creating Recons-Video Net")
 

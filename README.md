@@ -1,8 +1,8 @@
 # CDVD-TSP
 
-[![LICENSE](https://img.shields.io/badge/license-MIT-green)](https://github.com/csbhr/CDVD-TSP/blob/master/LICENSE)
+[![LICENSE](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/csbhr/CDVD-TSP/blob/master/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.6-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/pytorch-0.4.1-%237732a8)](https://pytorch.org/)
+[![PyTorch](https://img.shields.io/badge/pytorch-0.4.1-%237732a8.svg)](https://pytorch.org/)
 
 #### [Paper](https://arxiv.org/abs/2004.02501) | [Project Page](https://csbhr.github.io/projects/cdvd-tsp/index.html) | [Discussion](https://github.com/csbhr/CDVD-TSP/issues)
 ### Cascaded Deep Video Deblurring Using Temporal Sharpness Prior[[1](#user-content-citation-1)]
@@ -74,7 +74,7 @@ More detailed analysis and experimental results are included in [[Project Page]]
 - imageio: `conda install imageio`
 - skimage: `conda install scikit-image`
 - tqdm: `conda install tqdm`
-- cupy: `conda install -c anaconda cupy`
+- [cupy](https://github.com/cupy/cupy/): `conda install -c anaconda cupy`
 ### Example for Python 3.7
 ```dos
 conda install -y pytorch=0.4.1 torchvision cudatoolkit=9.2 -c pytorch
@@ -102,12 +102,15 @@ pip install cupy-cuda102
 ### Download
 - Pretrained models and Datasets can be downloaded [[Here]](https://drive.google.com/drive/folders/1lw_1jITafEQ9DvMys_S6aYwtNApYKWsz?usp=sharing).
 	- If you have downloaded the pretrained models，please put them to './pretrain_models'.
-      - CDVD_TSP_DVD_Paper.pt pretrained model that was done for the paper using [DeepVideoDeblurring dataset](https://github.com/shuochsu/DeepVideoDeblurring)
-      - CDVD_TSP_GOPRO.pt pretrained model using [GOPRO_Large dataset](https://github.com/SeungjunNah/DeepDeblur_release)
-      - CDVD_TSP_DVD_Convergent.pt pretrained model that continued until convergence
-      - network-default.pytorch pretrained model for PWC-Net[[3](#user-content-citation-3)]
-        - Available from the PyTorch-PWC author and can be downloaded [[Here]](http://content.sniklaus.com/github/pytorch-pwc/network-default.pytorch).
+    - CDVD_TSP_DVD_Paper.pt pretrained model that was done for the paper using [DeepVideoDeblurring dataset](https://github.com/shuochsu/DeepVideoDeblurring)
+    - CDVD_TSP_GOPRO.pt pretrained model using [GOPRO_Large dataset](https://github.com/SeungjunNah/DeepDeblur_release)
+    - CDVD_TSP_DVD_Convergent.pt pretrained model that continued until convergence
+    - network-default.pytorch pretrained model for PWC-Net[[3](#user-content-citation-3)]
+      - Available from the PyTorch-PWC author and can be downloaded [[Here]](http://content.sniklaus.com/github/pytorch-pwc/network-default.pytorch).
 	- If you have downloaded the datasets，please put them to './dataset'.
+    - [DeepVideoDeblurring](http://www.cs.ubc.ca/labs/imager/tr/2017/DeepVideoDeblurring/)
+    - [GOPRO_Large dataset](https://seungjunnah.github.io/Datasets/gopro.html)
+    - [REDS dataset](https://seungjunnah.github.io/Datasets/reds)
 
 ### Dataset Organization Form
 If you prepare your own dataset, please follow the following form:
@@ -125,9 +128,9 @@ If you prepare your own dataset, please follow the following form:
         |--video 1
             |--frame 1
             |--frame 2
-                ：  
+                ：
         |--video 2
-        	:
+         :
         |--video n
 ```
 

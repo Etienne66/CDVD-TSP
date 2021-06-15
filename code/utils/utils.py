@@ -70,17 +70,11 @@ def postprocess(*images, rgb_range, ycbcr_flag, device):
 
 
 def calc_psnr(img1, img2, rgb_range=1., shave=4):
-    if isinstance(img1, torch.Tensor):
-        img1 = img1[:, :, shave:-shave, shave:-shave]
-        img1 = img1.to('cpu').numpy()
-    if isinstance(img2, torch.Tensor):
-        img2 = img2[:, :, shave:-shave, shave:-shave]
-        img2 = img2.to('cpu').numpy()
-    mse = np.mean((img1 / rgb_range - img2 / rgb_range) ** 2)
+    mse = torch.mean(torch.sub(img1[:, :, shave:-shave, shave:-shave].div_(rgb_range),
+                               img2[:, :, shave:-shave, shave:-shave].div_(rgb_range)).pow_(2)).item()
     if mse == 0:
         return 100
-    PIXEL_MAX = 1
-    return 20 * math.log10(PIXEL_MAX / math.sqrt(mse))
+    return 20 * math.log10(1 / math.sqrt(mse))
 
 
 def calc_grad_sobel(img, device='cuda'):

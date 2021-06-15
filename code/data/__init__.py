@@ -27,7 +27,8 @@ class Data:
         testset = getattr(m_test, self.data_test.upper())(self.args, name=self.data_test, train=False)
         self.loader_test = DataLoader(
             testset,
-            batch_size=1,
+            #batch_size=1,
+            batch_size=self.args.batch_size,
             shuffle=False,
             pin_memory=not self.args.cpu,
             num_workers=self.args.n_threads

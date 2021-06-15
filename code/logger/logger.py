@@ -1,5 +1,6 @@
 import torch
 import imageio
+from torchvision.utils import save_image
 import numpy as np
 import os
 import datetime
@@ -77,11 +78,12 @@ class Logger:
             if not os.path.exists(dirname):
                 os.mkdir(dirname)
             filename = '{}/{}'.format(dirname, f[1])
-            postfix = ['gt', 'blur', 'deblur_iter1', 'deblur_iter2']
+            #postfix = ['gt', 'blur', 'deblur', 'deblur1']
+            postfix = ['gt', 'blur', 'deblur']
         else:
             raise NotImplementedError('Task [{:s}] is not found'.format(self.args.task))
         for img, post in zip(save_list, postfix):
-            img = img[0].data
+            #img = img[0].data
             img = np.transpose(img.cpu().numpy(), (1, 2, 0)).astype(np.uint8)
             if img.shape[2] == 1:
                 img = img.squeeze(axis=2)
@@ -89,6 +91,20 @@ class Logger:
                 img = sc.ycbcr2rgb(img.astype('float')).clip(0, 1)
                 img = (255 * img).round().astype('uint8')
             imageio.imwrite('{}_{}.png'.format(filename, post), img)
+
+    def save_images_tensor(self, filename, save_list, epoch):
+        if self.args.task == 'VideoDeblur':
+            f = filename.split('.')
+            dirname = '{}/result/{}/{}'.format(self.dir, self.args.data_test, f[0])
+            if not os.path.exists(dirname):
+                os.mkdir(dirname)
+            filename = '{}/{}'.format(dirname, f[1])
+            #postfix = ['gt', 'blur', 'deblur', 'deblur1']
+            postfix = ['gt', 'blur', 'deblur']
+        else:
+            raise NotImplementedError('Task [{:s}] is not found'.format(self.args.task))
+        for img, post in zip(save_list, postfix):
+            save_image('{}_{}.png'.format(filename, post), img)
 
     def start_log(self, train=True):
         if train:

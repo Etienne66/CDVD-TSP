@@ -11,6 +11,7 @@ try:
 except:
     sys.path.insert(0, './correlation')
     import correlation  # you should consider upgrading python
+# end
 
 
 def make_model(args):
@@ -45,8 +46,10 @@ class Flow_PWC(nn.Module):
 
         outputFlow = self.moduleNetwork(tensorPreprocessedFirst, tensorPreprocessedSecond)
 
-        tensorFlow = 20.0 * torch.nn.functional.interpolate(input=outputFlow, size=(intHeight, intWidth),
-                                                            mode='bilinear', align_corners=False)
+        tensorFlow = 20.0 * torch.nn.functional.interpolate(input=outputFlow,
+                                                            size=(intHeight, intWidth),
+                                                            mode='bilinear',
+                                                            align_corners=False)
 
         tensorFlow[:, 0, :, :] *= float(intWidth) / float(intPreprocessedWidth)
         tensorFlow[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
@@ -74,11 +77,16 @@ class Flow_PWC(nn.Module):
         vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
 
         vgrid = vgrid.permute(0, 2, 3, 1)
-				# Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0. Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
-				# Code was developed for 0.4.1
-        output = nn.functional.grid_sample(x, vgrid, padding_mode='border', align_corners=True)
+        # Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0. Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
+        # Code was developed for 0.4.1
+        output = nn.functional.grid_sample(x,
+                                           vgrid,
+                                           padding_mode='border',
+                                           align_corners=False)
         mask = torch.autograd.Variable(torch.ones(x.size())).cuda()
-        mask = nn.functional.grid_sample(mask, vgrid, align_corners=True)
+        mask = nn.functional.grid_sample(mask,
+                                         vgrid,
+                                         align_corners=False)
 
         mask[mask < 0.999] = 0
         mask[mask > 0] = 1
@@ -99,40 +107,64 @@ class Flow_PWC(nn.Module):
         frame_2_warp, mask = self.warp(frame_2, flow)
 
         return frame_2_warp, flow, frame_2_grad_warp, mask
+    # end
 
+##########################################################
 
-def Backward(tensorInput, tensorFlow, device='cuda'):
-    Backward_tensorGrid = {}
-    Backward_tensorPartial = {}
+def Backwarp(tensorInput, tensorFlow, device='cuda'):
+    Backwarp_tensorGrid = {}
+    Backwarp_tensorPartial = {}
 
-    if str(tensorFlow.size()) not in Backward_tensorGrid:
-        tensorHorizontal = torch.linspace(-1.0, 1.0, tensorFlow.size(3)).view(1, 1, 1, tensorFlow.size(3)).expand(
-            tensorFlow.size(0), -1, tensorFlow.size(2), -1)
-        tensorVertical = torch.linspace(-1.0, 1.0, tensorFlow.size(2)).view(1, 1, tensorFlow.size(2), 1).expand(
-            tensorFlow.size(0), -1, -1, tensorFlow.size(3))
+    if str(tensorFlow.shape) not in Backwarp_tensorGrid:
+        tensorHorizontal = torch.linspace(-1.0 + (1.0 / tensorFlow.shape[3]),
+                                          1.0 - (1.0 / tensorFlow.shape[3]),
+                                          tensorFlow.shape[3]
+                                         ).view(1,
+                                                1,
+                                                1,
+                                                -1
+                                               ).expand(-1,
+                                                        -1,
+                                                        tensorFlow.shape[2],
+                                                        -1)
+        tensorVertical = torch.linspace(-1.0  + (1.0 / tensorFlow.shape[2]),
+                                        1.0 - (1.0 / tensorFlow.shape[2]),
+                                        tensorFlow.shape[2]
+                                       ).view(1,
+                                              1,
+                                              -1,
+                                              1
+                                             ).expand(-1,
+                                                      -1,
+                                                      -1,
+                                                      tensorFlow.shape[3])
 
-        Backward_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1).to(device)
+        Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1).to(device)
+    # end
 
-    if str(tensorFlow.size()) not in Backward_tensorPartial:
-        Backward_tensorPartial[str(tensorFlow.size())] = tensorFlow.new_ones(
-            [tensorFlow.size(0), 1, tensorFlow.size(2), tensorFlow.size(3)])
+    if str(tensorFlow.size()) not in Backwarp_tensorPartial:
+        Backwarp_tensorPartial[str(tensorFlow.size())] = tensorFlow.new_ones([tensorFlow.size(0), 1, tensorFlow.size(2), tensorFlow.size(3)])
+    # end
 
     tensorFlow = torch.cat([tensorFlow[:, 0:1, :, :] / ((tensorInput.size(3) - 1.0) / 2.0),
                             tensorFlow[:, 1:2, :, :] / ((tensorInput.size(2) - 1.0) / 2.0)], 1)
-    tensorInput = torch.cat([tensorInput, Backward_tensorPartial[str(tensorFlow.size())]], 1)
+    tensorInput = torch.cat([tensorInput, Backwarp_tensorPartial[str(tensorFlow.size())]], 1)
 
-    # Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0. Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
-    # Code was developed for 0.4.1
-    tensorOutput = torch.nn.functional.grid_sample(input=tensorInput, grid=(
-            Backward_tensorGrid[str(tensorFlow.size())] + tensorFlow).permute(0, 2, 3, 1), mode='bilinear',
-                                                   padding_mode='zeros', align_corners=True)
+    tensorOutput = torch.nn.functional.grid_sample(input=tensorInput,
+                                                   grid=(Backwarp_tensorGrid[str(tensorFlow.size())] + tensorFlow
+                                                        ).permute(0, 2, 3, 1),
+                                                   mode='bilinear',
+                                                   padding_mode='zeros',
+                                                   align_corners=False)
 
     tensorMask = tensorOutput[:, -1:, :, :];
     tensorMask[tensorMask > 0.999] = 1.0;
     tensorMask[tensorMask < 1.0] = 0.0
 
     return tensorOutput[:, :-1, :, :] * tensorMask
+# end
 
+##########################################################
 
 class Network(torch.nn.Module):
     def __init__(self, device='cuda'):
@@ -195,6 +227,7 @@ class Network(torch.nn.Module):
                     torch.nn.Conv2d(in_channels=196, out_channels=196, kernel_size=3, stride=1, padding=1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
+            # end
 
             def forward(self, tensorInput):
                 tensorOne = self.moduleOne(tensorInput)
@@ -205,6 +238,8 @@ class Network(torch.nn.Module):
                 tensorSix = self.moduleSix(tensorFiv)
 
                 return [tensorOne, tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
+            # end
+        # end
 
         class Decoder(torch.nn.Module):
             def __init__(self, intLevel):
@@ -225,7 +260,7 @@ class Network(torch.nn.Module):
                         in_channels=intPrevious + 128 + 128 + 96 + 64 + 32, out_channels=2, kernel_size=4, stride=2,
                         padding=1)
                 if intLevel < 6:
-                    self.dblBackward = [None, None, None, 5.0, 2.5, 1.25, 0.625, None][intLevel + 1]
+                    self.dblBackwarp = [None, None, None, 5.0, 2.5, 1.25, 0.625, None][intLevel + 1]
 
                 self.moduleOne = torch.nn.Sequential(
                     torch.nn.Conv2d(in_channels=intCurrent, out_channels=128, kernel_size=3, stride=1, padding=1),
@@ -259,6 +294,7 @@ class Network(torch.nn.Module):
                     torch.nn.Conv2d(in_channels=intCurrent + 128 + 128 + 96 + 64 + 32, out_channels=2, kernel_size=3,
                                     stride=1, padding=1)
                 )
+            # end
 
             def forward(self, tensorFirst, tensorSecond, objectPrevious):
                 tensorFlow = None
@@ -270,7 +306,8 @@ class Network(torch.nn.Module):
 
                     tensorVolume = torch.nn.functional.leaky_relu(
                         input=correlation.FunctionCorrelation(tensorFirst=tensorFirst, tensorSecond=tensorSecond),
-                        negative_slope=0.1, inplace=False)
+                        negative_slope=0.1,
+                        inplace=False)
 
                     tensorFeat = torch.cat([tensorVolume], 1)
 
@@ -280,12 +317,14 @@ class Network(torch.nn.Module):
 
                     tensorVolume = torch.nn.functional.leaky_relu(
                         input=correlation.FunctionCorrelation(tensorFirst=tensorFirst,
-                                                              tensorSecond=Backward(tensorInput=tensorSecond,
-                                                                                    tensorFlow=tensorFlow * self.dblBackward,
+                                                              tensorSecond=Backwarp(tensorInput=tensorSecond,
+                                                                                    tensorFlow=tensorFlow * self.dblBackwarp,
                                                                                     device=device)),
-                        negative_slope=0.1, inplace=False)
+                        negative_slope=0.1,
+                        inplace=False)
 
                     tensorFeat = torch.cat([tensorVolume, tensorFirst, tensorFlow, tensorFeat], 1)
+                # end
 
                 tensorFeat = torch.cat([self.moduleOne(tensorFeat), tensorFeat], 1)
                 tensorFeat = torch.cat([self.moduleTwo(tensorFeat), tensorFeat], 1)
@@ -299,6 +338,8 @@ class Network(torch.nn.Module):
                     'tensorFlow': tensorFlow,
                     'tensorFeat': tensorFeat
                 }
+            # end
+        # end
 
         class Refiner(torch.nn.Module):
             def __init__(self):
@@ -320,9 +361,12 @@ class Network(torch.nn.Module):
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
                     torch.nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
                 )
+            # end
 
             def forward(self, tensorInput):
                 return self.moduleMain(tensorInput)
+            # end
+        # end
 
         self.moduleExtractor = Extractor()
 
@@ -334,7 +378,11 @@ class Network(torch.nn.Module):
 
         self.moduleRefiner = Refiner()
 
-        # self.load_state_dict(torch.load('./network-' + arguments_strModel + '.pytorch'))
+        #self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey,
+        #                      tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/github/pytorch-pwc/network-'
+        #                                                                          + arguments_strModel + '.pytorch',
+        #                                                                      file_name='pwc-' + arguments_strModel).items() })
+    # end
 
     def forward(self, tensorFirst, tensorSecond):
         tensorFirst = self.moduleExtractor(tensorFirst)
@@ -347,3 +395,5 @@ class Network(torch.nn.Module):
         objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
 
         return objectEstimate['tensorFlow'] + self.moduleRefiner(objectEstimate['tensorFeat'])
+    # end
+# end
