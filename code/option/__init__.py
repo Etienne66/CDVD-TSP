@@ -37,6 +37,10 @@ parser.add_argument('--n_colors', type=int, default=3,
                     help='number of color channels to use')
 parser.add_argument('--no_augment', action='store_true',
                     help='do not use data augmentation')
+parser.add_argument('--no_patch', action='store_true',
+                    help='do not use data augmentation')
+parser.add_argument('--n_sequence', type=int, default=5,
+                    help='Set number of frames to evaluate for 1 output frame')
 
 # Model specifications
 parser.add_argument('--model', default='.',
@@ -51,14 +55,28 @@ parser.add_argument('--epochs', type=int, default=500,
                     help='number of epochs to train')
 parser.add_argument('--batch_size', type=int, default=8,
                     help='input batch size for training')
+parser.add_argument('--batch_size_test', type=int, default=1,
+                    help='input batch size for testing')
 parser.add_argument('--test_only', action='store_true',
                     help='set this option to test the model')
+parser.add_argument('--lr_finder', action='store_true',
+                    help='Only run the LRFinder to determine your lr and max_lr for OneCycleLR')
+parser.add_argument('--lr_finder_Leslie_Smith', action='store_true',
+                    help='Run the LRFinder using Leslie Smith''s approach')
+parser.add_argument('--Adam', action='store_true',
+                    help='Use the original Adam Optimizer instead of AdamW')
+parser.add_argument('--StepLR', action='store_true',
+                    help='Use the original StepLR Scheduler instead of OneCycleLR')
+parser.add_argument('--LossL1HEM', action='store_true',
+                    help='Use the original 1*L1+2*HEM Loss instead of 0.84*MSL+0.16*L1')
 
 # Optimization specifications
 parser.add_argument('--loss', type=str, default='1*L1',
                     help='loss function configuration')
 parser.add_argument('--lr', type=float, default=1e-4,
-                    help='learning rate')
+                    help='Sets Learning Rate')
+parser.add_argument('--max_lr', type=float, default=1e-4,
+                    help='Sets maximum Learning Rate for LRFinder and OneCycleLR')
 parser.add_argument('--lr_decay', type=int, default=200,
                     help='learning rate decay per N epochs')
 parser.add_argument('--gamma', type=float, default=0.5,
@@ -70,6 +88,8 @@ parser.add_argument('--beta2', type=float, default=0.999,
 parser.add_argument('--epsilon', type=float, default=1e-8,
                     help='ADAM epsilon for numerical stability')
 parser.add_argument('--weight_decay', type=float, default=0,
+                    help='weight decay')
+parser.add_argument('--AdamW_weight_decay', type=float, default=1e-2,
                     help='weight decay')
 parser.add_argument('--mid_loss_weight', type=float, default=1.,
                     help='the weight of mid loss in trainer')

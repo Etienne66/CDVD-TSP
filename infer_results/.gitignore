@@ -1,0 +1,10 @@
+/**/
+*.txt
+!DVD_S3/
+!DVD_S7/
+!DVD_OCLR_S3/
+!DVD_OCLR_S5/
+!DVD_S3/**
+!DVD_S7/**
+!DVD_OCLR_S3/**
+!DVD_OCLR_S5/**

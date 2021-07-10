@@ -9,6 +9,31 @@
 By [Jinshan Pan](https://jspan.github.io/), [Haoran Bai](https://csbhr.github.io/about), and Jinhui Tang
 
 ## Updates
+[2021-03-10] Many revisions to code
+* Changed loss function to `0.84*MSL + 0.16(L1)`
+  * `MSL = (1 - MS-SSIM)` Needed so that it acts like a loss function
+  * The research for "Loss Functions For Image Restoration With Neural Networks" indicates that this loss function gives results that are more visually appealing.
+  * [Research Paper](https://arxiv.org/pdf/1511.08861.pdf)
+  * [Source Code](https://github.com/NVlabs/PL4NN)
+  * [Supplementary Material](http://research.nvidia.com/publication/loss-functions-image-restoration-neural-networks)
+  * Used MM-SSIM function from [Fast and differentiable MS-SSIM and SSIM for pytorch. ](https://github.com/VainF/pytorch-msssim)
+  * Added `--LossL1HEM` switch to use original loss function
+* Changed scheduler from `StepLR` to `OneCycleLR` and changed optimizer from `Adam` to `AdamW` to implement [Super-Convergence](https://towardsdatascience.com/super-convergence-with-just-pytorch-c223c0fc1e51)
+  * A better explanation of [The 1cycle policy](https://sgugger.github.io/the-1cycle-policy.html)
+  * Implemented [PyTorch learning rate finder](https://github.com/davidtvs/pytorch-lr-finder)
+    * For loss function `0.84*MSL+0.16*L1` the ranges is `min_lr = 6e-6` to `max_lr = 2.5e-5`
+      * This is with 5 frames, batch size of 3, and patch size of 256
+    * For original loss function `1*L1+2*HEM` the ranges is `min_lr = 3e-6` to `max_lr = 8e-6`
+      * Original starting `lr = 1e-4` which is far above the range that is stable
+    * Added flags `StepLR` and `--Adam` to change back to original
+- Change logging to not use a buffer. Lines were being lost when power was lost.
+- Added torch.backends.cudnn.benchmark = True to improve performance
+- Added Save State for Scheduler, Random Number Generator State and a few variables
+- Corrested mistakes with `--resume`
+- Added graph for Learning Rate
+- Added graph for MS-SSIM during training session if used in Loss function
+- Added graph for SSIM during testing phase of training session
+
 [2021-05-23] Many improvements to code.
 - Several warnings and errors were addressed
   - Issues Fixed [#12](https://github.com/csbhr/CDVD-TSP/issues/12), [#22](https://github.com/csbhr/CDVD-TSP/issues/22), [#24](https://github.com/csbhr/CDVD-TSP/issues/24), [#26](https://github.com/csbhr/CDVD-TSP/issues/26)
@@ -74,6 +99,7 @@ More detailed analysis and experimental results are included in [[Project Page]]
 - imageio: `conda install imageio`
 - skimage: `conda install scikit-image`
 - tqdm: `conda install tqdm`
+- [torch-lr-finder](https://github.com/davidtvs/pytorch-lr-finder): `pip install torch-lr-finder`
 - [cupy](https://github.com/cupy/cupy/): `conda install -c anaconda cupy`
 ### Example for Python 3.7
 ```dos
@@ -83,6 +109,7 @@ conda install -y opencv
 conda install -y imageio
 conda install -y scikit-image
 conda install -y tqdm
+pip install torch-lr-finder
 pip install cupy-cuda92
 ```
 ### Example for Python 3.8
@@ -93,6 +120,7 @@ conda install -y opencv
 conda install -y imageio
 conda install -y scikit-image
 conda install -y tqdm
+pip install torch-lr-finder
 pip install cupy-cuda102
 ```
 
@@ -135,33 +163,47 @@ If you prepare your own dataset, please follow the following form:
 ```
 
 ### Training
+- Paper was trained with an Nvidia RTX Titan with 24GB RAM
+  - Reduce batch size when less RAM available
 - Download the PWC-Net[[3](#user-content-citation-3)] pretrained model.
 - Download training dataset, or prepare your own dataset like above form.
-- Each epoch has a training phase and a testing phase to determine the PSNR and evaluate the results.
+- Each epoch has a training phase and a testing phase to determine the PSNR/SSIM to evaluate the results.
 - Run the following commands:
 ```
 cd ./code
 python main.py --save Experiment_Name --dir_data path/to/train/dataset --dir_data_test path/to/val/dataset --epochs 500 --batch_size 8
-  # --save:          Experiment name to save
-                     The experiment result will be in './experiment/'.
-  # --dir_data:      The path of the training dataset.
+  --save:          Experiment name to save
+                     The experiment result will be in '../experiment/'.
+  --dir_data:      The path of the training dataset.
                      Used during the training phase of the epoch.
-  # --dir_data_test: The path of the evaluating dataset during training process.
+  --dir_data_test: The path of the evaluating dataset during training process.
                      Used during the testing phase of the epoch.
-  # --epochs:        The number of training epochs.
-  # --batch_size:    The mini batch size.
-  # --print_every:   How many batches to wait before logging training status
-                     during training phase of epoch.
-  # --save_images:   Save images during test phase of epoch.
-  # --load:          Experiment name to load
+  --n_sequence     Set number of frames to evaluate for 1 output frame. Default 5
+  --epochs:        The number of training epochs. Default 
+  --batch_size:    The mini batch size. Default 8
+  --patch_size     The size to crop the data to during Training. Default 256
+  --save_images:   Save images during test phase of epoch. Default False
+  --load:          Experiment name to load
                      The experiment result must be in './experiment/'.
                      Use --resume to continue at the last epoch completed
-  # --resume:        Resume from the latest complete epoch must use --load instead of --save.
-```
-#### Examples of Training
-`python main.py --save CDVD_TSP_DVD_Convergent --dir_data F:\workspaces\CDVD-TSP\dataset\DVD\train --dir_data_test F:\workspaces\CDVD-TSP\dataset\DVD\test --epochs 1000 --print_every 500 --batch_size 2`
+  --resume:        Resume from the latest complete epoch must use --load instead of --save.
+  --lr             Sets learning Rate. Default 1e-4
+  --max_lr         Sets maximum Learning Rate for LRFinder and OneCycleLR. Default 1e-4
+  --lrfinder       Only run the LRFinder to determine your lr and max_lr for OneCycleLR. Default False
+  --StepLR         Use the original StepLR Scheduler instead of OneCycleLR. Default False
+  --Adam           Use the original Adam Optimizer instead of AdamW. Default False
+  --LossL1HEM      Use the original 1*L1+2*HEM Loss instead of 0.84*MSL+0.16*L1. Default False
 
-`python main.py --resume --load CDVD_TSP_DVD_Convergent --dir_data F:\workspaces\CDVD-TSP\dataset\DVD\train --dir_data_test F:\workspaces\CDVD-TSP\dataset\DVD\test --epochs 1000 --print_every 500 --batch_size 2`
+```
+- #### Examples of Training
+  - ##### Find Learning Rate
+    `python main.py --save CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 30 --patch_size 448 --batch_size 1 --lr_finder --lr 1e-7 --max_lr 0.1`
+  - ##### Start Training
+    `python main.py --save CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 100 --lr 8e-6 --max_lr 5e-5 --batch_size 1 --patch_size 448`
+  - ##### Resume Training
+    `python main.py --resume --load CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 150 --lr 8e-6 --max_lr 5e-5 --batch_size 1 --patch_size 448`
+  - ##### Start Training with Original settings
+    `python main.py --save CDVD_TSP_DVD --Adam --StepLR --LossL1HEM --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test`
 
 
 ### Testing

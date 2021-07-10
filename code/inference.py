@@ -15,7 +15,7 @@ class Traverse_Logger:
     def __init__(self, result_dir, filename='inference_log.txt'):
         self.log_file_path = os.path.join(result_dir, filename)
         open_type = 'a' if os.path.exists(self.log_file_path) else 'w'
-        self.log_file = open(self.log_file_path, open_type)
+        self.log_file = open(self.log_file_path, open_type, buffering=1)
 
     def write_log(self, log):
         print(log)
@@ -30,7 +30,8 @@ class Inference:
         self.model_path = args.model_path
         self.data_path = args.data_path
         self.result_path = args.result_path
-        self.n_seq = 5
+        #self.n_seq = 5
+        self.n_seq = args.n_seq
         self.size_must_mode = 4
         self.device = 'cuda'
 
@@ -57,15 +58,20 @@ class Inference:
         self.logger.write_log('device: {}'.format(self.device))
 
         self.net = CDVD_TSP(
-            in_channels=3, n_sequence=5, out_channels=3, n_resblock=3, n_feat=32,
-            is_mask_filter=True, device=self.device
-        )
+            in_channels    = 3,
+            n_sequence     = self.n_seq,
+            out_channels   = 3,
+            n_resblock     = 3,
+            n_feat         = 32,
+            is_mask_filter = True,
+            device         = self.device)
         self.net.load_state_dict(torch.load(self.model_path), strict=False)
         self.net = self.net.to(self.device)
         self.logger.write_log('Loading model from {}'.format(self.model_path))
         self.net.eval()
 
     def infer(self):
+        torch.backends.cudnn.benchmark = True
         with torch.no_grad():
             total_psnr = {}
             total_ssim = {}
@@ -84,18 +90,20 @@ class Inference:
                         start_time = time.time()
                         filename = os.path.basename(in_seq[self.n_seq // 2]).split('.')[0]
                         inputs = [imageio.imread(p) for p in in_seq]
-                        gt = imageio.imread(gt_seq[self.n_seq // 2])
 
                         h, w, c = inputs[self.n_seq // 2].shape
                         new_h, new_w = h - h % self.size_must_mode, w - w % self.size_must_mode
                         inputs = [im[:new_h, :new_w, :] for im in inputs]
-                        gt = gt[:new_h, :new_w, :]
+                        #print(len(inputs))
+                        #exit()
 
                         in_tensor = self.numpy2tensor(inputs).to(self.device)
                         preprocess_time = time.time()
-                        _, output_stage1, _, output, _ = self.net(in_tensor)
+                        output = self.net(in_tensor)
                         forward_time = time.time()
                         output_img = self.tensor2numpy(output)
+                        gt = imageio.imread(gt_seq[self.n_seq // 2])
+                        gt = gt[:new_h, :new_w, :]
 
                         psnr, ssim = self.get_PSNR_SSIM(output_img, gt)
                         video_psnr.append(psnr)
@@ -118,8 +126,17 @@ class Inference:
                                         postprocess_time - start_time))
                 else:      
                     len_frames = len(input_frames)
-                    temp_frames = [input_frames[3], input_frames[2]] + input_frames\
-                                  + [input_frames[len_frames-1], input_frames[len_frames-2]]
+                # Wrap frames around the ends so that the output has the same number of frames as the input
+                # The process throws away n_seq // 2 from the start and finish of the video
+                    if self.n_seq == 3:
+                        temp_frames = [input_frames[2]] + input_frames\
+                                      + [input_frames[len_frames-1]]
+                    elif self.n_seq == 5:
+                        temp_frames = [input_frames[3], input_frames[2]] + input_frames\
+                                      + [input_frames[len_frames-1], input_frames[len_frames-2]]
+                    elif self.n_seq == 7:
+                        temp_frames = [input_frames[4], input_frames[3], input_frames[2]] + input_frames\
+                                      + [input_frames[len_frames-1], input_frames[len_frames-2], input_frames[len_frames-3]]
                     input_frames = temp_frames
                     input_seqs = self.gene_seq(input_frames, n_seq=self.n_seq)
                     del temp_frames
@@ -136,14 +153,13 @@ class Inference:
 
                         in_tensor = self.numpy2tensor(inputs).to(self.device)
                         preprocess_time = time.time()
-                        _, output_stage1, _, output, _ = self.net(in_tensor)
+                        output = self.net(in_tensor)
                         forward_time = time.time()
-                        output_img = self.tensor2numpy(output)
 
-                        if self.save_image:
-                            if not os.path.exists(os.path.join(self.result_path, v)):
-                                os.mkdir(os.path.join(self.result_path, v))
-                            imageio.imwrite(os.path.join(self.result_path, v, '{}.png'.format(filename)), output_img)
+                        output_img = self.tensor2numpy(output)
+                        if not os.path.exists(os.path.join(self.result_path, v)):
+                            os.mkdir(os.path.join(self.result_path, v))
+                        imageio.imwrite(os.path.join(self.result_path, v, '{}.png'.format(filename)), output_img)
                         postprocess_time = time.time()
 
                         self.logger.write_log(
@@ -262,11 +278,14 @@ class Inference:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='CDVD-TSP-Inference')
 
-    parser.add_argument('--save_image', action='store_true', default=True, help='save image if true')
+    parser.add_argument('--save_image', action='store_true', help='save image if true')
     parser.add_argument('--border', action='store_true', help='restore border images of video if true')
 
     parser.add_argument('--default_data', type=str, default='.',
                         help='quick test, optional: DVD, GOPRO')
+    parser.add_argument('--n_seq', type=int, default=5,
+                        help='number of frames to evaluate for 1 output frame')
+
     if platform.system() == 'Windows':
         parser.add_argument('--data_path', type=str, default='..\dataset\DVD\test',
                             help='the path of test data')

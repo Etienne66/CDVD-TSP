@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loss.hard_example_mining import HEM
+from datetime import datetime
 import matplotlib
 
 matplotlib.use('Agg')
@@ -19,9 +20,16 @@ class Loss(nn.modules.loss._Loss):
         device = torch.device('cpu' if args.cpu else 'cuda')
 
         self.n_GPUs = args.n_GPUs
+        self.lr_finder = args.lr_finder
         self.loss = []
         self.loss_module = nn.ModuleList()
-        for loss in args.loss.split('+'):
+
+        if args.LossL1HEM:
+            loss_string = args.loss
+        else:
+            loss_string = args.loss_MSL
+
+        for loss in loss_string.split('+'):
             weight, loss_type = loss.split('*')
             if loss_type == 'MSE':
                 loss_function = nn.MSELoss()
@@ -71,24 +79,27 @@ class Loss(nn.modules.loss._Loss):
 
     def forward(self, sr, hr):
         losses = []
+        start_time = datetime.now()
         for i, l in enumerate(self.loss):
             if l['function'] is not None:
+                start_time_function = datetime.now()
                 loss = l['function'](sr, hr)
-                effective_loss = l['weight'] * loss
-                losses.append(effective_loss)
-                self.log[-1, i] += effective_loss.item()
-                #self.log[-1, i, 0] += loss.item()
-                #self.log[-1, i, 1] = l['weight']
-            elif l['type'] == 'DIS':
-                self.log[-1, i] += self.loss[i - 1]['function'].loss
-                #self.log[-1, i, 0] += self.loss[i - 1]['function'].loss
-                #self.log[-1, i, 1] = l['weight']
+                losses.append(l['weight'] * loss)
+                if not self.lr_finder:
+                    self.log[-1, i, 0] += loss.item()
+                    self.log[-1, i, 1] = l['weight']
+                    self.log[-1, i, 2] += (datetime.now() - start_time_function).total_seconds()
+            elif l['type'] == 'DIS' and not self.lr_finder:
+                start_time_function = datetime.now()
+                self.log[-1, i, 0] += self.loss[i - 1]['function'].loss
+                self.log[-1, i, 1] = l['weight']
+                self.log[-1, i, 2] += (datetime.now() - start_time_function).total_seconds()
 
         loss_sum = sum(losses)
-        if len(self.loss) > 1:
-            self.log[-1, -1] += loss_sum.item()
-            #self.log[-1, -1, 0] += loss_sum.item()
-            #self.log[-1, -1, 1] = 0
+        if len(self.loss) > 1 and not self.lr_finder:
+            self.log[-1, -1, 0] += loss_sum.item()
+            self.log[-1, -1, 1] = 0
+            self.log[-1, -1, 2] += (datetime.now() - start_time).total_seconds()
 
         return loss_sum
 
@@ -98,55 +109,83 @@ class Loss(nn.modules.loss._Loss):
                 l.scheduler.step()
 
     def start_log(self):
-        self.log = torch.cat((self.log, torch.zeros(1, len(self.loss))))
-        #self.log = torch.cat((self.log, torch.zeros(1, len(self.loss), 1)))
+        self.log = torch.cat((self.log, torch.zeros([1, len(self.loss), 3])))
 
     def end_log(self, n_batches):
-        self.log[-1].div_(n_batches)
+        self.log[-1,:,0].div_(n_batches)
 
     def display_loss(self, batch):
         n_samples = batch + 1
         log = []
         for l, c in zip(self.loss, self.log[-1]):
             if l['type'] == 'MSL':
-                log.append('[{}: {:.6f}]'.format('MS-SSIM', 1 - c / (n_samples * l['weight'])))
-
-            log.append('[{}: {:.6f}]'.format(l['type'], c / n_samples))
+                log.append('[{}: {:.2f}(1 - {:.6f})]'.format('MS-SSIM', l['weight'], 1 - (c[0] / n_samples)))
+            elif l['type'] == 'Total':
+                log.append('[{}: {:.6f}]'.format(l['type'], c[0] / n_samples))
+            else:
+                log.append('[{}: {:.2f}({:.6f})]'.format(l['type'], l['weight'], c[0] / n_samples))
 
         return ''.join(log)
 
     def plot_loss(self, apath, epoch):
         if epoch > 1:
             axis = np.linspace(1, epoch, epoch)
-            fig = plt.figure()
+            #fig = plt.figure()
+            fig, ax1 = plt.subplots()
+            ax2 = ax1.twinx()
             plt.title('Loss Functions')
             for i, l in enumerate(self.loss):
-                label = '{} Loss'.format(l['type'])
-                plt.plot(axis, self.log[:, i].numpy(), label=label)
-            plt.legend()
-            plt.xlabel('Epochs')
-            plt.ylabel('Loss')
-            plt.grid(True)
-            #plt.savefig('{}/loss_loss_{}.pdf'.format(apath, l['type']))
-            plt.savefig('{}/loss.pdf'.format(apath))
-            plt.close(fig)
-        # Print the losses without weights
-            axis = np.linspace(1, epoch, epoch)
-            fig = plt.figure()
-            plt.title('Loss Functions without weights')
-            for i, l in enumerate(self.loss):
+                loss_label = '{} Loss'.format(l['type'])
+                weight_label = '{} Weight'.format(l['type'])
+                ax1.plot(axis, self.log[:, i, 0].numpy(), label=loss_label)
                 if l['type'] != 'Total':
-                    label = '{} Loss'.format(l['type'])
-                    plt.plot(axis, self.log[:, i].numpy()/l['weight'], label=label)
-            plt.legend()
+                    ax2.plot(axis, self.log[:, i, 1].numpy(), ':',label=weight_label)
+                if l['type'] == 'MSL':
+                    #weight_label = 'MS-SSIM'
+                    #ax2.plot(axis, 1 - self.log[:, i, 0].numpy(), '--',label=weight_label)
+                    MSSSIM = 1 - self.log[:, i, 0].numpy()
+            lines, labels = ax1.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            plt.legend(lines + lines2, labels + labels2)
+            #plt.legend(handles = (lines,lines2),
+            #           labels = (labels,labels2),
+            #           loc = 'best')
             plt.xlabel('Epochs')
-            plt.ylabel('Loss')
-            plt.grid(True)
-            #plt.savefig('{}/loss_loss_{}.pdf'.format(apath, l['type']))
-            plt.savefig('{}/loss_clean.pdf'.format(apath))
+            ax1.set_ylabel('Loss')
+            ax2.set_ylabel('Weight') 
+            ax1.grid(True)
+            #plt.grid(True)
+            fig.tight_layout()
+            plt.savefig('{}/loss.png'.format(apath), dpi=300)
             plt.close(fig)
+            
+            if MSSSIM is not None:
+                label = 'MS-SSIM'
+                fig = plt.figure()
+                plt.title(label)
+                plt.plot(axis, MSSSIM, label=label)
+                plt.xlabel('Epochs')
+                plt.ylabel(label)
+                plt.grid(True)
+                plt.savefig('{}/{}.png'.format(apath, label), dpi=300)  
+                plt.close(fig)
 
-
+            #axis = np.linspace(1, epoch, epoch)
+            #for i, l in enumerate(self.loss):
+            #    label = '{} Loss'.format(l['type'])
+            #    fig = plt.figure()
+            #    plt.title(label)
+            #    plt.plot(axis, self.log[:, i].numpy(), label=label)
+            #    plt.legend()
+            #    plt.xlabel('Epochs')
+            #    plt.ylabel('Loss')
+            #    plt.grid(True)
+            #    plt.savefig('{}/loss_loss_{}.pdf'.format(apath, l['type']))            
+            #    plt.close(fig)
+            
+            
+            
+            
     def get_loss_module(self):
         if self.n_GPUs == 1:
             return self.loss_module
@@ -154,7 +193,7 @@ class Loss(nn.modules.loss._Loss):
             return self.loss_module.module
 
     def save(self, apath):
-        torch.save(self.state_dict(), os.path.join(apath, 'loss.pt'))
+        torch.save(self.state_dict(), os.path.join(apath, 'loss_state.pt'))
         torch.save(self.log, os.path.join(apath, 'loss_log.pt'))
 
     def load(self, apath, cpu=False):
@@ -164,7 +203,7 @@ class Loss(nn.modules.loss._Loss):
             kwargs = {}
 
         self.load_state_dict(torch.load(
-            os.path.join(apath, 'loss.pt'),
+            os.path.join(apath, 'loss_state.pt'),
             **kwargs
         ))
         self.log = torch.load(os.path.join(apath, 'loss_log.pt'))

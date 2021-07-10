@@ -10,6 +10,7 @@ class Model(nn.Module):
         super(Model, self).__init__()
         print('Making model...')
         self.args = args
+        epoch = len(ckp.psnr_log)
         self.cpu = args.cpu
         self.device = torch.device('cpu' if args.cpu else 'cuda')
         self.n_GPUs = args.n_GPUs
@@ -22,11 +23,13 @@ class Model(nn.Module):
 
         self.load(
             ckp.dir,
-            pre_train=args.pre_train,
-            resume=args.resume,
-            cpu=args.cpu
+            pre_train = args.pre_train,
+            resume    = args.resume,
+            cpu       = args.cpu
         )
-        print(self.get_model(), file=ckp.log_file)
+        
+        if not args.lr_finder and epoch == 0:
+            print(self.get_model(), file=ckp.config_file)
 
     def forward(self, *args):
         return self.model(*args)

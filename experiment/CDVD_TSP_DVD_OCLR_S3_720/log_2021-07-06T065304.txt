@@ -1,0 +1,682 @@
+CDVD_TSP(
+  (flow_net): Flow_PWC(
+    (moduleNetwork): Network(
+      (moduleExtractor): Extractor(
+        (moduleOne): Sequential(
+          (0): Conv2d(3, 16, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(16, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(64, 96, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(96, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(128, 196, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(196, 196, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(196, 196, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+      )
+      (moduleTwo): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(597, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(117, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(245, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(373, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(469, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(533, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(565, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleThr): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(629, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(149, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(277, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(405, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(501, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(565, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(597, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleFou): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(661, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(181, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(309, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(437, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(533, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(597, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(629, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleFiv): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(529, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(213, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(341, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(469, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(565, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(629, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(661, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleSix): Decoder(
+        (moduleOne): Sequential(
+          (0): Conv2d(81, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(209, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(337, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(433, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(497, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(529, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleRefiner): Refiner(
+        (moduleMain): Sequential(
+          (0): Conv2d(565, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(2, 2), dilation=(2, 2))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(4, 4), dilation=(4, 4))
+          (5): LeakyReLU(negative_slope=0.1)
+          (6): Conv2d(128, 96, kernel_size=(3, 3), stride=(1, 1), padding=(8, 8), dilation=(8, 8))
+          (7): LeakyReLU(negative_slope=0.1)
+          (8): Conv2d(96, 64, kernel_size=(3, 3), stride=(1, 1), padding=(16, 16), dilation=(16, 16))
+          (9): LeakyReLU(negative_slope=0.1)
+          (10): Conv2d(64, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (11): LeakyReLU(negative_slope=0.1)
+          (12): Conv2d(32, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+    )
+  )
+  (recons_net): RECONS_VIDEO(
+    (inBlock): Sequential(
+      (0): Sequential(
+        (0): Conv2d(10, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (1): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+    )
+    (encoder_first): Sequential(
+      (0): Sequential(
+        (0): Conv2d(32, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2))
+        (1): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+    )
+    (encoder_second): Sequential(
+      (0): Sequential(
+        (0): Conv2d(64, 128, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2))
+        (1): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+    )
+    (decoder_second): Sequential(
+      (0): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): Sequential(
+        (0): ConvTranspose2d(128, 64, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), output_padding=(1, 1))
+        (1): ReLU(inplace=True)
+      )
+    )
+    (decoder_first): Sequential(
+      (0): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): Sequential(
+        (0): ConvTranspose2d(64, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), output_padding=(1, 1))
+        (1): ReLU(inplace=True)
+      )
+    )
+    (outBlock): Sequential(
+      (0): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): Conv2d(32, 3, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    )
+  )
+)
+Epoch   61 with Lr 2.44508e-5 start: 2021-07-06 06:53:50]
+	[CE: 2021-07-06 08:56:28][AE: 2021-07-09 16:39:31]
+	Loss: [MS-SSIM: 0.84(1 - 0.977162)][L1: 0.16(0.015163)][Total: 0.021610]
+	[Now: 2021-07-06 08:42:04][CE: 2021-07-06 08:53:16][AE: 2021-07-09 16:39:31]
+Now testing
+	Test Epoch  61
+
+Evaluation:
+	[DVD]	average PSNR: 30.696 (Best: 30.737 @epoch 60) SSIM: 0.904421 (Best: 0.905398 @epoch 60)
+Epoch   62 with Lr 2.35716e-5 start: 2021-07-06 08:52:47]
+	[CE: 2021-07-06 10:55:18][AE: 2021-07-09 16:33:22]
+	Loss: [MS-SSIM: 0.84(1 - 0.977410)][L1: 0.16(0.015082)][Total: 0.021389]
+	[Now: 2021-07-06 10:41:04][CE: 2021-07-06 10:52:16][AE: 2021-07-09 16:33:22]
+Now testing
+	Test Epoch  62
+
+Evaluation:
+	[DVD]	average PSNR: 30.780 (Best: 30.780 @epoch 62) SSIM: 0.906009 (Best: 0.906009 @epoch 62)
+Epoch   63 with Lr 2.26851e-5 start: 2021-07-06 10:51:39]
+	[CE: 2021-07-06 12:54:04][AE: 2021-07-09 16:27:18]
+	Loss: [MS-SSIM: 0.84(1 - 0.977498)][L1: 0.16(0.015068)][Total: 0.021313]
+	[Now: 2021-07-06 12:40:10][CE: 2021-07-06 12:51:21][AE: 2021-07-09 16:27:18]
+Now testing
+	Test Epoch  63
+
+Evaluation:
+	[DVD]	average PSNR: 30.799 (Best: 30.799 @epoch 63) SSIM: 0.905883 (Best: 0.906009 @epoch 62)
+Epoch   64 with Lr 2.17933e-5 start: 2021-07-06 12:50:39]
+	[CE: 2021-07-06 14:52:59][AE: 2021-07-09 16:21:40]
+	Loss: [MS-SSIM: 0.84(1 - 0.977364)][L1: 0.16(0.015061)][Total: 0.021424]
+	[Now: 2021-07-06 14:40:08][CE: 2021-07-06 14:51:19][AE: 2021-07-09 16:21:40]
+Now testing
+	Test Epoch  64
+
+Evaluation:
+	[DVD]	average PSNR: 30.760 (Best: 30.799 @epoch 63) SSIM: 0.905633 (Best: 0.906009 @epoch 62)
+Epoch   65 with Lr 2.08978e-5 start: 2021-07-06 14:50:56]
+	[CE: 2021-07-06 16:53:11][AE: 2021-07-09 16:18:11]
+	Loss: [MS-SSIM: 0.84(1 - 0.977754)][L1: 0.16(0.014985)][Total: 0.021084]
+	[Now: 2021-07-06 16:41:10][CE: 2021-07-06 16:52:20][AE: 2021-07-09 16:18:11]
+Now testing
+	Test Epoch  65
+
+Evaluation:
+	[DVD]	average PSNR: 30.751 (Best: 30.799 @epoch 63) SSIM: 0.906022 (Best: 0.906022 @epoch 65)
+Epoch   66 with Lr 2.00005e-5 start: 2021-07-06 16:52:10]
+	[CE: 2021-07-06 18:54:19][AE: 2021-07-09 16:16:14]
+	Loss: [MS-SSIM: 0.84(1 - 0.977736)][L1: 0.16(0.014964)][Total: 0.021096]
+	[Now: 2021-07-06 18:42:12][CE: 2021-07-06 18:53:22][AE: 2021-07-09 16:16:14]
+Now testing
+	Test Epoch  66
+
+Evaluation:
+	[DVD]	average PSNR: 30.715 (Best: 30.799 @epoch 63) SSIM: 0.906239 (Best: 0.906239 @epoch 66)
+Epoch   67 with Lr 1.91033e-5 start: 2021-07-06 18:52:50]
+	[CE: 2021-07-06 20:54:55][AE: 2021-07-09 16:13:32]
+	Loss: [MS-SSIM: 0.84(1 - 0.978063)][L1: 0.16(0.014895)][Total: 0.020810]
+	[Now: 2021-07-06 20:43:56][CE: 2021-07-06 20:55:06][AE: 2021-07-09 16:13:32]
+Now testing
+	Test Epoch  67
+
+Evaluation:
+	[DVD]	average PSNR: 30.813 (Best: 30.813 @epoch 67) SSIM: 0.905940 (Best: 0.906239 @epoch 66)
+Epoch   68 with Lr 1.82078e-5 start: 2021-07-06 20:54:31]
+	[CE: 2021-07-06 22:56:33][AE: 2021-07-09 16:12:27]
+	Loss: [MS-SSIM: 0.84(1 - 0.978099)][L1: 0.16(0.014860)][Total: 0.020774]
+	[Now: 2021-07-06 22:43:31][CE: 2021-07-06 22:54:40][AE: 2021-07-09 16:12:27]
+Now testing
+	Test Epoch  68
+
+Evaluation:
+	[DVD]	average PSNR: 30.820 (Best: 30.820 @epoch 68) SSIM: 0.907307 (Best: 0.907307 @epoch 68)
+Epoch   69 with Lr 1.73160e-5 start: 2021-07-06 22:54:24]
+	[CE: 2021-07-07 00:56:20][AE: 2021-07-09 16:08:41]
+	Loss: [MS-SSIM: 0.84(1 - 0.978214)][L1: 0.16(0.014829)][Total: 0.020673]
+	[Now: 2021-07-07 00:45:00][CE: 2021-07-07 00:56:09][AE: 2021-07-09 16:08:41]
+Now testing
+	Test Epoch  69
+
+Evaluation:
+	[DVD]	average PSNR: 30.850 (Best: 30.850 @epoch 69) SSIM: 0.907950 (Best: 0.907950 @epoch 69)
+Epoch   70 with Lr 1.64295e-5 start: 2021-07-07 00:55:44]
+	[CE: 2021-07-07 02:57:38][AE: 2021-07-09 16:07:12]
+	Loss: [MS-SSIM: 0.84(1 - 0.978155)][L1: 0.16(0.014790)][Total: 0.020716]
+	[Now: 2021-07-07 02:46:20][CE: 2021-07-07 02:57:28][AE: 2021-07-09 16:07:12]
+Now testing
+	Test Epoch  70
+
+Evaluation:
+	[DVD]	average PSNR: 30.848 (Best: 30.850 @epoch 69) SSIM: 0.907084 (Best: 0.907950 @epoch 69)
+Epoch   71 with Lr 1.55503e-5 start: 2021-07-07 02:57:24]
+	[CE: 2021-07-07 04:59:12][AE: 2021-07-09 16:06:09]
+	Loss: [MS-SSIM: 0.84(1 - 0.978495)][L1: 0.16(0.014725)][Total: 0.020420]
+	[Now: 2021-07-07 04:46:33][CE: 2021-07-07 04:57:41][AE: 2021-07-09 16:06:09]
+Now testing
+	Test Epoch  71
+
+Evaluation:
+	[DVD]	average PSNR: 30.901 (Best: 30.901 @epoch 71) SSIM: 0.908242 (Best: 0.908242 @epoch 71)
+Epoch   72 with Lr 1.46800e-5 start: 2021-07-07 04:57:29]
+	[CE: 2021-07-07 06:59:08][AE: 2021-07-09 16:02:51]
+	Loss: [MS-SSIM: 0.84(1 - 0.978613)][L1: 0.16(0.014694)][Total: 0.020316]
+	[Now: 2021-07-07 06:46:37][CE: 2021-07-07 06:57:44][AE: 2021-07-09 16:02:51]
+Now testing
+	Test Epoch  72
+
+Evaluation:
+	[DVD]	average PSNR: 30.845 (Best: 30.901 @epoch 71) SSIM: 0.907669 (Best: 0.908242 @epoch 71)
+Epoch   73 with Lr 1.38204e-5 start: 2021-07-07 06:57:18]
+	[CE: 2021-07-07 08:58:52][AE: 2021-07-09 15:59:22]
+	Loss: [MS-SSIM: 0.84(1 - 0.978617)][L1: 0.16(0.014675)][Total: 0.020310]
+	[Now: 2021-07-07 08:45:57][CE: 2021-07-07 08:57:04][AE: 2021-07-09 15:59:22]
+Now testing
+	Test Epoch  73
+
+Evaluation:
+	[DVD]	average PSNR: 30.901 (Best: 30.901 @epoch 73) SSIM: 0.907758 (Best: 0.908242 @epoch 71)
+Epoch   74 with Lr 1.29733e-5 start: 2021-07-07 08:56:42]
+	[CE: 2021-07-07 10:58:11][AE: 2021-07-09 15:55:25]
+	Loss: [MS-SSIM: 0.84(1 - 0.978734)][L1: 0.16(0.014608)][Total: 0.020201]
+	[Now: 2021-07-07 10:45:11][CE: 2021-07-07 10:56:18][AE: 2021-07-09 15:55:25]
+Now testing
+	Test Epoch  74
+
+Evaluation:
+	[DVD]	average PSNR: 30.920 (Best: 30.920 @epoch 74) SSIM: 0.908529 (Best: 0.908529 @epoch 74)
+Epoch   75 with Lr 1.21403e-5 start: 2021-07-07 10:55:49]
+	[CE: 2021-07-07 12:57:11][AE: 2021-07-09 15:51:09]
+	Loss: [MS-SSIM: 0.84(1 - 0.978828)][L1: 0.16(0.014594)][Total: 0.020120]
+	[Now: 2021-07-07 12:44:39][CE: 2021-07-07 12:55:46][AE: 2021-07-09 15:51:09]
+Now testing
+	Test Epoch  75
+
+Evaluation:
+	[DVD]	average PSNR: 30.954 (Best: 30.954 @epoch 75) SSIM: 0.908750 (Best: 0.908750 @epoch 75)
+Epoch   76 with Lr 1.13232e-5 start: 2021-07-07 12:55:12]
+	[CE: 2021-07-07 14:56:30][AE: 2021-07-09 15:47:24]
+	Loss: [MS-SSIM: 0.84(1 - 0.979074)][L1: 0.16(0.014533)][Total: 0.019903]
+	[Now: 2021-07-07 14:43:48][CE: 2021-07-07 14:54:54][AE: 2021-07-09 15:47:24]
+Now testing
+	Test Epoch  76
+
+Evaluation:
+	[DVD]	average PSNR: 30.914 (Best: 30.954 @epoch 75) SSIM: 0.908250 (Best: 0.908750 @epoch 75)
+Epoch   77 with Lr 1.05235e-5 start: 2021-07-07 14:54:26]
+	[CE: 2021-07-07 16:55:38][AE: 2021-07-09 15:43:32]
+	Loss: [MS-SSIM: 0.84(1 - 0.979096)][L1: 0.16(0.014519)][Total: 0.019882]
+	[Now: 2021-07-07 16:43:21][CE: 2021-07-07 16:54:27][AE: 2021-07-09 15:43:32]
+Now testing
+	Test Epoch  77
+
+Evaluation:
+	[DVD]	average PSNR: 30.962 (Best: 30.962 @epoch 77) SSIM: 0.909592 (Best: 0.909592 @epoch 77)
+Epoch   78 with Lr 9.74293e-6 start: 2021-07-07 16:53:59]
+	[CE: 2021-07-07 18:55:05][AE: 2021-07-09 15:40:09]
+	Loss: [MS-SSIM: 0.84(1 - 0.979222)][L1: 0.16(0.014472)][Total: 0.019769]
+	[Now: 2021-07-07 18:46:41][CE: 2021-07-07 18:57:46][AE: 2021-07-09 15:40:09]
+Now testing
+	Test Epoch  78
+
+Evaluation:
+	[DVD]	average PSNR: 30.983 (Best: 30.983 @epoch 78) SSIM: 0.908876 (Best: 0.909592 @epoch 77)
+Epoch   79 with Lr 8.98301e-6 start: 2021-07-07 18:57:25]
+	[CE: 2021-07-07 20:58:30][AE: 2021-07-09 15:41:52]
+	Loss: [MS-SSIM: 0.84(1 - 0.979204)][L1: 0.16(0.014490)][Total: 0.019787]
+	[Now: 2021-07-07 20:48:22][CE: 2021-07-07 20:59:27][AE: 2021-07-09 15:41:52]
+Now testing
+	Test Epoch  79
+
+Evaluation:
+	[DVD]	average PSNR: 30.993 (Best: 30.993 @epoch 79) SSIM: 0.909826 (Best: 0.909826 @epoch 79)
+Epoch   80 with Lr 8.24528e-6 start: 2021-07-07 20:59:44]
+	[CE: 2021-07-07 23:00:46][AE: 2021-07-09 15:42:08]
+	Loss: [MS-SSIM: 0.84(1 - 0.979294)][L1: 0.16(0.014446)][Total: 0.019704]
+	[Now: 2021-07-07 22:48:51][CE: 2021-07-07 22:59:56][AE: 2021-07-09 15:42:08]
+Now testing
+	Test Epoch  80
+
+Evaluation:
+	[DVD]	average PSNR: 31.004 (Best: 31.004 @epoch 80) SSIM: 0.910077 (Best: 0.910077 @epoch 80)
+Epoch   81 with Lr 7.53121e-6 start: 2021-07-07 22:59:36]
+	[CE: 2021-07-08 01:00:32][AE: 2021-07-09 15:39:17]
+	Loss: [MS-SSIM: 0.84(1 - 0.979490)][L1: 0.16(0.014388)][Total: 0.019531]
+	[Now: 2021-07-08 00:48:08][CE: 2021-07-08 00:59:12][AE: 2021-07-09 15:39:17]
+Now testing
+	Test Epoch  81
+
+Evaluation:
+	[DVD]	average PSNR: 31.049 (Best: 31.049 @epoch 81) SSIM: 0.910565 (Best: 0.910565 @epoch 81)
+Epoch   82 with Lr 6.84226e-6 start: 2021-07-08 00:58:45]
+	[CE: 2021-07-08 02:59:36][AE: 2021-07-09 15:35:40]
+	Loss: [MS-SSIM: 0.84(1 - 0.979511)][L1: 0.16(0.014373)][Total: 0.019510]
+	[Now: 2021-07-08 02:47:27][CE: 2021-07-08 02:58:32][AE: 2021-07-09 15:35:40]
+Now testing
+	Test Epoch  82
+
+Evaluation:
+	[DVD]	average PSNR: 31.061 (Best: 31.061 @epoch 82) SSIM: 0.910788 (Best: 0.910788 @epoch 82)
+Epoch   83 with Lr 6.17981e-6 start: 2021-07-08 02:58:15]
+	[CE: 2021-07-08 04:59:01][AE: 2021-07-09 15:32:33]
+	Loss: [MS-SSIM: 0.84(1 - 0.979499)][L1: 0.16(0.014358)][Total: 0.019518]
+	[Now: 2021-07-08 04:47:41][CE: 2021-07-08 04:58:45][AE: 2021-07-09 15:32:33]
+Now testing
+	Test Epoch  83
+
+Evaluation:
+	[DVD]	average PSNR: 31.074 (Best: 31.074 @epoch 83) SSIM: 0.910458 (Best: 0.910788 @epoch 82)
+Epoch   84 with Lr 5.54520e-6 start: 2021-07-08 04:58:45]
+	[CE: 2021-07-08 06:59:27][AE: 2021-07-09 15:30:43]
+	Loss: [MS-SSIM: 0.84(1 - 0.979618)][L1: 0.16(0.014365)][Total: 0.019419]
+	[Now: 2021-07-08 06:47:38][CE: 2021-07-08 06:58:42][AE: 2021-07-09 15:30:43]
+Now testing
+	Test Epoch  84
+
+Evaluation:
+	[DVD]	average PSNR: 31.067 (Best: 31.074 @epoch 83) SSIM: 0.911109 (Best: 0.911109 @epoch 84)
+Epoch   85 with Lr 4.93969e-6 start: 2021-07-08 06:58:36]
+	[CE: 2021-07-08 08:59:14][AE: 2021-07-09 15:28:10]
+	Loss: [MS-SSIM: 0.84(1 - 0.979701)][L1: 0.16(0.014307)][Total: 0.019340]
+	[Now: 2021-07-08 08:48:45][CE: 2021-07-08 08:59:49][AE: 2021-07-09 15:28:10]
+Now testing
+	Test Epoch  85
+
+Evaluation:
+	[DVD]	average PSNR: 31.097 (Best: 31.097 @epoch 85) SSIM: 0.911110 (Best: 0.911110 @epoch 85)
+Epoch   86 with Lr 4.36452e-6 start: 2021-07-08 08:59:32]
+	[CE: 2021-07-08 11:00:07][AE: 2021-07-09 15:26:57]
+	Loss: [MS-SSIM: 0.84(1 - 0.979823)][L1: 0.16(0.014258)][Total: 0.019230]
+	[Now: 2021-07-08 10:49:01][CE: 2021-07-08 11:00:05][AE: 2021-07-09 15:26:57]
+Now testing
+	Test Epoch  86
+
+Evaluation:
+	[DVD]	average PSNR: 31.065 (Best: 31.097 @epoch 85) SSIM: 0.910937 (Best: 0.911110 @epoch 85)
+Epoch   87 with Lr 3.82083e-6 start: 2021-07-08 10:59:45]
+	[CE: 2021-07-08 13:00:15][AE: 2021-07-09 15:24:54]
+	Loss: [MS-SSIM: 0.84(1 - 0.979855)][L1: 0.16(0.014244)][Total: 0.019201]
+	[Now: 2021-07-08 12:49:01][CE: 2021-07-08 13:00:05][AE: 2021-07-09 15:24:54]
+Now testing
+	Test Epoch  87
+
+Evaluation:
+	[DVD]	average PSNR: 31.113 (Best: 31.113 @epoch 87) SSIM: 0.911625 (Best: 0.911625 @epoch 87)
+Epoch   88 with Lr 3.30973e-6 start: 2021-07-08 12:59:41]
+	[CE: 2021-07-08 15:00:07][AE: 2021-07-09 15:22:36]
+	Loss: [MS-SSIM: 0.84(1 - 0.979926)][L1: 0.16(0.014238)][Total: 0.019140]
+	[Now: 2021-07-08 14:49:42][CE: 2021-07-08 15:00:45][AE: 2021-07-09 15:22:36]
+Now testing
+	Test Epoch  88
+
+Evaluation:
+	[DVD]	average PSNR: 31.096 (Best: 31.113 @epoch 87) SSIM: 0.911375 (Best: 0.911625 @epoch 87)
+Epoch   89 with Lr 2.83224e-6 start: 2021-07-08 15:00:32]
+	[CE: 2021-07-08 17:00:54][AE: 2021-07-09 15:21:22]
+	Loss: [MS-SSIM: 0.84(1 - 0.979845)][L1: 0.16(0.014252)][Total: 0.019210]
+	[Now: 2021-07-08 16:52:44][CE: 2021-07-08 17:03:47][AE: 2021-07-09 15:21:22]
+Now testing
+	Test Epoch  89
+
+Evaluation:
+	[DVD]	average PSNR: 31.117 (Best: 31.117 @epoch 89) SSIM: 0.911855 (Best: 0.911855 @epoch 89)
+Epoch   90 with Lr 2.38933e-6 start: 2021-07-08 17:03:49]
+	[CE: 2021-07-08 19:04:07][AE: 2021-07-09 15:22:53]
+	Loss: [MS-SSIM: 0.84(1 - 0.979961)][L1: 0.16(0.014213)][Total: 0.019107]
+	[Now: 2021-07-08 18:53:25][CE: 2021-07-08 19:04:28][AE: 2021-07-09 15:22:53]
+Now testing
+	Test Epoch  90
+
+Evaluation:
+	[DVD]	average PSNR: 31.119 (Best: 31.119 @epoch 90) SSIM: 0.911659 (Best: 0.911855 @epoch 89)
+Epoch   91 with Lr 1.98188e-6 start: 2021-07-08 19:04:10]
+	[CE: 2021-07-08 21:04:24][AE: 2021-07-09 15:21:08]
+	Loss: [MS-SSIM: 0.84(1 - 0.980017)][L1: 0.16(0.014198)][Total: 0.019057]
+	[Now: 2021-07-08 20:53:39][CE: 2021-07-08 21:04:42][AE: 2021-07-09 15:21:08]
+Now testing
+	Test Epoch  91
+
+Evaluation:
+	[DVD]	average PSNR: 31.130 (Best: 31.130 @epoch 91) SSIM: 0.911930 (Best: 0.911930 @epoch 91)
+Epoch   92 with Lr 1.61072e-6 start: 2021-07-08 21:04:29]
+	[CE: 2021-07-08 23:04:39][AE: 2021-07-09 15:19:23]
+	Loss: [MS-SSIM: 0.84(1 - 0.980153)][L1: 0.16(0.014147)][Total: 0.018935]
+	[Now: 2021-07-08 22:53:57][CE: 2021-07-08 23:04:59][AE: 2021-07-09 15:19:23]
+Now testing
+	Test Epoch  92
+
+Evaluation:
+	[DVD]	average PSNR: 31.132 (Best: 31.132 @epoch 92) SSIM: 0.911865 (Best: 0.911930 @epoch 91)
+Epoch   93 with Lr 1.27660e-6 start: 2021-07-08 23:04:45]
+	[CE: 2021-07-09 01:04:49][AE: 2021-07-09 15:17:35]
+	Loss: [MS-SSIM: 0.84(1 - 0.980142)][L1: 0.16(0.014178)][Total: 0.018949]
+	[Now: 2021-07-09 00:55:43][CE: 2021-07-09 01:06:45][AE: 2021-07-09 15:17:35]
+Now testing
+	Test Epoch  93
+
+Evaluation:
+	[DVD]	average PSNR: 31.132 (Best: 31.132 @epoch 93) SSIM: 0.911910 (Best: 0.911930 @epoch 91)
+Epoch   94 with Lr 9.80186e-7 start: 2021-07-09 01:06:25]
+	[CE: 2021-07-09 03:06:27][AE: 2021-07-09 15:17:22]
+	Loss: [MS-SSIM: 0.84(1 - 0.980126)][L1: 0.16(0.014164)][Total: 0.018961]
+	[Now: 2021-07-09 02:55:38][CE: 2021-07-09 03:06:41][AE: 2021-07-09 15:17:22]
+Now testing
+	Test Epoch  94
+
+Evaluation:
+	[DVD]	average PSNR: 31.140 (Best: 31.140 @epoch 94) SSIM: 0.911945 (Best: 0.911945 @epoch 94)
+Epoch   95 with Lr 7.22075e-7 start: 2021-07-09 03:06:29]
+	[CE: 2021-07-09 05:06:26][AE: 2021-07-09 15:15:26]
+	Loss: [MS-SSIM: 0.84(1 - 0.980173)][L1: 0.16(0.014166)][Total: 0.018921]
+	[Now: 2021-07-09 04:55:58][CE: 2021-07-09 05:07:00][AE: 2021-07-09 15:15:26]
+Now testing
+	Test Epoch  95
+
+Evaluation:
+	[DVD]	average PSNR: 31.144 (Best: 31.144 @epoch 95) SSIM: 0.912060 (Best: 0.912060 @epoch 95)
+Epoch   96 with Lr 5.02788e-7 start: 2021-07-09 05:06:48]
+	[CE: 2021-07-09 07:06:41][AE: 2021-07-09 15:13:49]
+	Loss: [MS-SSIM: 0.84(1 - 0.980084)][L1: 0.16(0.014171)][Total: 0.018997]
+	[Now: 2021-07-09 06:56:00][CE: 2021-07-09 07:07:02][AE: 2021-07-09 15:13:49]
+Now testing
+	Test Epoch  96
+
+Evaluation:
+	[DVD]	average PSNR: 31.147 (Best: 31.147 @epoch 96) SSIM: 0.912214 (Best: 0.912214 @epoch 96)
+Epoch   97 with Lr 3.22768e-7 start: 2021-07-09 07:06:46]
+	[CE: 2021-07-09 09:06:35][AE: 2021-07-09 15:11:53]
+	Loss: [MS-SSIM: 0.84(1 - 0.980195)][L1: 0.16(0.014159)][Total: 0.018901]
+	[Now: 2021-07-09 08:56:30][CE: 2021-07-09 09:07:31][AE: 2021-07-09 15:11:53]
+Now testing
+	Test Epoch  97
+
+Evaluation:
+	[DVD]	average PSNR: 31.146 (Best: 31.147 @epoch 96) SSIM: 0.912140 (Best: 0.912214 @epoch 96)
+Epoch   98 with Lr 1.82377e-7 start: 2021-07-09 09:07:17]
+	[CE: 2021-07-09 11:07:04][AE: 2021-07-09 15:10:34]
+	Loss: [MS-SSIM: 0.84(1 - 0.980098)][L1: 0.16(0.014155)][Total: 0.018983]
+	[Now: 2021-07-09 10:56:56][CE: 2021-07-09 11:07:58][AE: 2021-07-09 15:10:34]
+Now testing
+	Test Epoch  98
+
+Evaluation:
+	[DVD]	average PSNR: 31.149 (Best: 31.149 @epoch 98) SSIM: 0.912169 (Best: 0.912214 @epoch 96)
+Epoch   99 with Lr 8.18968e-8 start: 2021-07-09 11:07:48]
+	[CE: 2021-07-09 13:07:25][AE: 2021-07-09 15:09:10]
+	Loss: [MS-SSIM: 0.84(1 - 0.980096)][L1: 0.16(0.014149)][Total: 0.018983]
+	[Now: 2021-07-09 12:57:55][CE: 2021-07-09 13:08:56][AE: 2021-07-09 15:09:10]
+Now testing
+	Test Epoch  99
+
+Evaluation:
+	[DVD]	average PSNR: 31.148 (Best: 31.149 @epoch 98) SSIM: 0.912167 (Best: 0.912214 @epoch 96)

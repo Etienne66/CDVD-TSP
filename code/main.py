@@ -24,6 +24,7 @@ def time_diff(start, end):
 if __name__ == '__main__':
     args = option.args
     torch.manual_seed(args.seed)
+    torch.backends.cudnn.benchmark = True
     chkp = logger.Logger(args)
 
     if args.task == 'VideoDeblur':
@@ -34,10 +35,12 @@ if __name__ == '__main__':
         t = Trainer_CDVD_TSP(args, loader, model, loss, chkp)
         start_time = args.start_time
         print("Start time: {}".format(args.start_time.strftime("%Y-%m-%d %H:%M:%S")))
-        while not t.terminate():
-            t.train()
-            t.test()
+        if not args.lr_finder:
+            while not t.terminate():
+                t.train()
+                t.test()
     else:
         raise NotImplementedError('Task [{:s}] is not found'.format(args.task))
 
-    chkp.done()
+    if not args.lr_finder:
+        chkp.done()

@@ -28,7 +28,7 @@ class Data:
         self.loader_test = DataLoader(
             testset,
             #batch_size=1,
-            batch_size=self.args.batch_size,
+            batch_size=self.args.batch_size_test,
             shuffle=False,
             pin_memory=not self.args.cpu,
             num_workers=self.args.n_threads

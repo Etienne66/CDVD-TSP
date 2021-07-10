@@ -6,7 +6,6 @@ import torch
 import torch.utils.data as data
 import utils.utils as utils
 
-
 class VIDEODATA(data.Dataset):
     def __init__(self, args, name='', train=True):
         self.args = args
@@ -95,12 +94,13 @@ class VIDEODATA(data.Dataset):
         inputs_concat, gts_concat = self.get_patch(inputs_concat, gts_concat, self.args.size_must_mode)
         inputs_list = [inputs_concat[:, :, i*self.args.n_colors:(i+1)*self.args.n_colors] for i in range(self.n_seq)]
         gts_list = [gts_concat[:, :, i*self.args.n_colors:(i+1)*self.args.n_colors] for i in range(self.n_seq)]
+        # 0:3 3:6 6:9 9:12 12:15
         inputs = np.array(inputs_list)
         gts = np.array(gts_list)
-
+        
         input_tensors = utils.np2Tensor(*inputs, rgb_range=self.args.rgb_range, n_colors=self.args.n_colors)
         gt_tensors = utils.np2Tensor(*gts, rgb_range=self.args.rgb_range, n_colors=self.args.n_colors)
-
+        
         return torch.stack(input_tensors), torch.stack(gt_tensors), filenames
 
     def __len__(self):
@@ -132,7 +132,7 @@ class VIDEODATA(data.Dataset):
         gts = np.array([imageio.imread(hr_name) for hr_name in f_gts])
         inputs = np.array([imageio.imread(lr_name) for lr_name in f_inputs])
         filenames = [os.path.split(os.path.dirname(name))[-1] + '.' + os.path.splitext(os.path.basename(name))[0]
-                     for name in f_gts]
+                     for name in f_inputs]
 
         return inputs, gts, filenames
 
@@ -150,11 +150,13 @@ class VIDEODATA(data.Dataset):
 
     def get_patch(self, input, gt, size_must_mode=1):
         if self.train:
-            input, gt = utils.get_patch(input, gt, patch_size=self.args.patch_size)
+            if not self.args.no_patch:
+                input, gt = utils.get_patch(input, gt, patch_size=self.args.patch_size)
             h, w, c = input.shape
             new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
             input, gt = input[:new_h, :new_w, :], gt[:new_h, :new_w, :]
-            if not self.args.no_augment:
+            
+            if not self.args.no_augment and not self.args.no_patch:
                 input, gt = utils.data_augment(input, gt)
         else:
             h, w, c = input.shape

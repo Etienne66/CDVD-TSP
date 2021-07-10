@@ -1,0 +1,359 @@
+CDVD_TSP(
+  (flow_net): Flow_PWC(
+    (moduleNetwork): Network(
+      (moduleExtractor): Extractor(
+        (moduleOne): Sequential(
+          (0): Conv2d(3, 16, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(16, 16, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(16, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(32, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(64, 96, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(96, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(128, 196, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(196, 196, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(196, 196, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (5): LeakyReLU(negative_slope=0.1)
+        )
+      )
+      (moduleTwo): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(597, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(117, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(245, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(373, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(469, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(533, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(565, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleThr): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(629, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(149, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(277, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(405, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(501, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(565, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(597, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleFou): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(661, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(181, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(309, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(437, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(533, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(597, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(629, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleFiv): Decoder(
+        (moduleUpflow): ConvTranspose2d(2, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleUpfeat): ConvTranspose2d(529, 2, kernel_size=(4, 4), stride=(2, 2), padding=(1, 1))
+        (moduleOne): Sequential(
+          (0): Conv2d(213, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(341, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(469, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(565, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(629, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(661, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleSix): Decoder(
+        (moduleOne): Sequential(
+          (0): Conv2d(81, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleTwo): Sequential(
+          (0): Conv2d(209, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleThr): Sequential(
+          (0): Conv2d(337, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFou): Sequential(
+          (0): Conv2d(433, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleFiv): Sequential(
+          (0): Conv2d(497, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+        )
+        (moduleSix): Sequential(
+          (0): Conv2d(529, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (moduleRefiner): Refiner(
+        (moduleMain): Sequential(
+          (0): Conv2d(565, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (1): LeakyReLU(negative_slope=0.1)
+          (2): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(2, 2), dilation=(2, 2))
+          (3): LeakyReLU(negative_slope=0.1)
+          (4): Conv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(4, 4), dilation=(4, 4))
+          (5): LeakyReLU(negative_slope=0.1)
+          (6): Conv2d(128, 96, kernel_size=(3, 3), stride=(1, 1), padding=(8, 8), dilation=(8, 8))
+          (7): LeakyReLU(negative_slope=0.1)
+          (8): Conv2d(96, 64, kernel_size=(3, 3), stride=(1, 1), padding=(16, 16), dilation=(16, 16))
+          (9): LeakyReLU(negative_slope=0.1)
+          (10): Conv2d(64, 32, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (11): LeakyReLU(negative_slope=0.1)
+          (12): Conv2d(32, 2, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+    )
+  )
+  (recons_net): RECONS_VIDEO(
+    (inBlock): Sequential(
+      (0): Sequential(
+        (0): Conv2d(10, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (1): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+    )
+    (encoder_first): Sequential(
+      (0): Sequential(
+        (0): Conv2d(32, 64, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2))
+        (1): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+    )
+    (encoder_second): Sequential(
+      (0): Sequential(
+        (0): Conv2d(64, 128, kernel_size=(5, 5), stride=(2, 2), padding=(2, 2))
+        (1): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+    )
+    (decoder_second): Sequential(
+      (0): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(128, 128, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): Sequential(
+        (0): ConvTranspose2d(128, 64, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), output_padding=(1, 1))
+        (1): ReLU(inplace=True)
+      )
+    )
+    (decoder_first): Sequential(
+      (0): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(64, 64, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): Sequential(
+        (0): ConvTranspose2d(64, 32, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1), output_padding=(1, 1))
+        (1): ReLU(inplace=True)
+      )
+    )
+    (outBlock): Sequential(
+      (0): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (1): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (2): ResBlock(
+        (conv1): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (conv2): Conv2d(32, 32, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+        (relu): ReLU(inplace=True)
+      )
+      (3): Conv2d(32, 3, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+    )
+  )
+)
+Epoch   53 with Lr 3.10181e-5 start: 2021-07-05 13:57:24]
+	[CE: 2021-07-05 15:59:55][AE: 2021-07-09 15:58:18]
+	Loss: [MS-SSIM: 0.84(1 - 0.975793)][L1: 0.16(0.015619)][Total: 0.022832]
+	[Now: 2021-07-05 15:49:11][CE: 2021-07-05 16:00:24][AE: 2021-07-09 15:58:18]
+Now testing
+	Test Epoch  53
+
+Evaluation:
+	[DVD]	average PSNR: 30.380 (Best: 30.466 @epoch 52) SSIM: 0.900674 (Best: 0.902264 @epoch 49)
+Epoch   54 with Lr 3.02582e-5 start: 2021-07-05 15:59:46]
+	[CE: 2021-07-05 18:02:14][AE: 2021-07-09 15:57:54]
+	Loss: [MS-SSIM: 0.84(1 - 0.976273)][L1: 0.16(0.015490)][Total: 0.022409]
+	[Now: 2021-07-05 17:51:30][CE: 2021-07-05 18:02:42][AE: 2021-07-09 15:57:54]
+Now testing
+	Test Epoch  54
+
+Evaluation:
+	[DVD]	average PSNR: 30.221 (Best: 30.466 @epoch 52) SSIM: 0.900740 (Best: 0.902264 @epoch 49)
+Epoch   55 with Lr 2.94776e-5 start: 2021-07-05 18:02:16]
+	[CE: 2021-07-05 20:04:41][AE: 2021-07-09 15:57:48]
+	Loss: [MS-SSIM: 0.84(1 - 0.976188)][L1: 0.16(0.015486)][Total: 0.022480]
+	[Now: 2021-07-05 19:53:00][CE: 2021-07-05 20:04:12][AE: 2021-07-09 15:57:48]
+Now testing
+	Test Epoch  55
+
+Evaluation:
+	[DVD]	average PSNR: 30.522 (Best: 30.522 @epoch 55) SSIM: 0.902539 (Best: 0.902539 @epoch 55)
+Epoch   56 with Lr 2.86779e-5 start: 2021-07-05 20:03:38]
