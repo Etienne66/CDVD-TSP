@@ -27,7 +27,7 @@ By [Jinshan Pan](https://jspan.github.io/), [Haoran Bai](https://csbhr.github.io
       * Original starting `lr = 1e-4` which is far above the range that is stable
     * Added flags `StepLR` and `--Adam` to change back to original
 - Change logging to not use a buffer. Lines were being lost when power was lost.
-- Added torch.backends.cudnn.benchmark = True to improve performance
+- Added `torch.backends.cudnn.benchmark = True` to improve performance
 - Added Save State for Scheduler, Random Number Generator State and a few variables
 - Corrested mistakes with `--resume`
 - Added graph for Learning Rate
