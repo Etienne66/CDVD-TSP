@@ -164,7 +164,8 @@ If you prepare your own dataset, please follow the following form:
 
 ### Training
 - Paper was trained with an Nvidia RTX Titan with 24GB RAM
-  - Reduce batch size when less RAM available
+  - Took 45 minutes per epoch at 300 Epochs used in the paper.
+  - Will need to reduce batch size when less RAM available.
 - Download the PWC-Net[[3](#user-content-citation-3)] pretrained model.
 - Download training dataset, or prepare your own dataset like above form.
 - Each epoch has a training phase and a testing phase to determine the PSNR/SSIM to evaluate the results.
@@ -172,21 +173,21 @@ If you prepare your own dataset, please follow the following form:
 ```
 cd ./code
 python main.py --save Experiment_Name --dir_data path/to/train/dataset --dir_data_test path/to/val/dataset --epochs 500 --batch_size 8
-  --save:          Experiment name to save
+  --save           Experiment name to save
                      The experiment result will be in '../experiment/'.
-  --dir_data:      The path of the training dataset.
+  --dir_data       The path of the training dataset.
                      Used during the training phase of the epoch.
-  --dir_data_test: The path of the evaluating dataset during training process.
+  --dir_data_test  The path of the evaluating dataset during training process.
                      Used during the testing phase of the epoch.
   --n_sequence     Set number of frames to evaluate for 1 output frame. Default 5
-  --epochs:        The number of training epochs. Default 
-  --batch_size:    The mini batch size. Default 8
+  --epochs         The number of training epochs. Default 
+  --batch_size     The mini batch size. Default 8
   --patch_size     The size to crop the data to during Training. Default 256
-  --save_images:   Save images during test phase of epoch. Default False
-  --load:          Experiment name to load
-                     The experiment result must be in './experiment/'.
+  --save_images    Save images during test phase of epoch. Default False
+  --load           Experiment name to load
+                     The experiment result must be in '../experiment/'.
                      Use --resume to continue at the last epoch completed
-  --resume:        Resume from the latest complete epoch must use --load instead of --save.
+  --resume         Resume from the latest complete epoch must use --load instead of --save.
   --lr             Sets learning Rate. Default 1e-4
   --max_lr         Sets maximum Learning Rate for LRFinder and OneCycleLR. Default 1e-4
   --lrfinder       Only run the LRFinder to determine your lr and max_lr for OneCycleLR. Default False
@@ -197,10 +198,10 @@ python main.py --save Experiment_Name --dir_data path/to/train/dataset --dir_dat
 ```
 - #### Examples of Training
   - ##### Find Learning Rate
-    `python main.py --save CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 30 --patch_size 448 --batch_size 1 --lr_finder --lr 1e-7 --max_lr 0.1`
+    `python main.py --save CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 150 --patch_size 448 --batch_size 1 --lr_finder --lr 1e-7 --max_lr 0.1`
   - ##### Start Training
-    `python main.py --save CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 100 --lr 8e-6 --max_lr 5e-5 --batch_size 1 --patch_size 448`
-  - ##### Resume Training
+    `python main.py --save CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 150 --lr 8e-6 --max_lr 5e-5 --batch_size 1 --patch_size 448`
+  - ##### Resume Training (Settings should match Start Training)
     `python main.py --resume --load CDVD_TSP_DVD_OCLR_448 --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test --epochs 150 --lr 8e-6 --max_lr 5e-5 --batch_size 1 --patch_size 448`
   - ##### Start Training with Original settings
     `python main.py --save CDVD_TSP_DVD --Adam --StepLR --LossL1HEM --dir_data ..\dataset\DVD\train --dir_data_test ..\dataset\DVD\test`
