@@ -15,12 +15,15 @@ parser.add_argument('--n_GPUs', type=int, default=1,
                     help='number of GPUs')
 parser.add_argument('--seed', type=int, default=1,
                     help='random seed')
+parser.add_argument('--use_checkpoint', action='store_true',
+                    help='Use torch.utils.checkpoint to lower the Memory usage but take longer')
+                    
 
 # Data specifications
-parser.add_argument('--dir_data', type=str, default='../dataset/DVD/train',
-                    help='dataset directory')
-parser.add_argument('--dir_data_test', type=str, default='../dataset/DVD/test',
-                    help='dataset directory')
+parser.add_argument('--dir_data', type=str, default='DVD',
+                    help='comma separated list of directories in ../dataset to use for train')
+parser.add_argument('--dir_data_test', type=str, default='DVD',
+                    help='comma separated list of directories in ../dataset to use for test')
 parser.add_argument('--data_train', type=str, default='DVD',
                     help='train dataset name')
 parser.add_argument('--data_test', type=str, default='DVD',
@@ -50,7 +53,7 @@ parser.add_argument('--pre_train', type=str, default='.',
 
 # Training specifications
 parser.add_argument('--test_every', type=int, default=1000,
-                    help='do test per every N batches')
+                    help='Minimum number of images for training')
 parser.add_argument('--epochs', type=int, default=500,
                     help='number of epochs to train')
 parser.add_argument('--batch_size', type=int, default=8,
@@ -67,8 +70,16 @@ parser.add_argument('--Adam', action='store_true',
                     help='Use the original Adam Optimizer instead of AdamW')
 parser.add_argument('--StepLR', action='store_true',
                     help='Use the original StepLR Scheduler instead of OneCycleLR')
+parser.add_argument('--OneCycleLR', action='store_true',
+                    help='Use the OneCycleLR Scheduler')
 parser.add_argument('--LossL1HEM', action='store_true',
                     help='Use the original 1*L1+2*HEM Loss instead of 0.84*MSL+0.16*L1')
+parser.add_argument('--LossMslL1', action='store_true',
+                    help='Use 0.84*MSL+0.16*L1')
+parser.add_argument('--original_loss', action='store_true',
+                    help='Combine the losses of all stages the same as the original')
+parser.add_argument('--separate_loss', action='store_true',
+                    help='Calculate losses during separate backward passes.')
 
 # Optimization specifications
 parser.add_argument('--loss', type=str, default='1*L1',
@@ -87,7 +98,7 @@ parser.add_argument('--beta2', type=float, default=0.999,
                     help='ADAM beta2')
 parser.add_argument('--epsilon', type=float, default=1e-8,
                     help='ADAM epsilon for numerical stability')
-parser.add_argument('--weight_decay', type=float, default=0,
+parser.add_argument('--weight_decay', type=float, default=0.,
                     help='weight decay')
 parser.add_argument('--AdamW_weight_decay', type=float, default=1e-2,
                     help='weight decay')
@@ -111,6 +122,12 @@ parser.add_argument('--print_every', type=int, default=100,
                     help='how many batches to wait before logging training status')
 parser.add_argument('--save_images', action='store_true',
                     help='save images during test phase of epoch')
+parser.add_argument('--plot_running_average', action='store_true',
+                    help='Plot the total for every epoch as a running average')
+parser.add_argument('--running_average', type=int, default=2000,
+                    help='How many iterations to include in the running average. Also how often to save plot during training.')
+
+
 
 args = parser.parse_args()
 template.set_template(args)

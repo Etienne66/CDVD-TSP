@@ -3,14 +3,14 @@ from importlib import import_module
 import numpy as np
 import torch
 import torch.nn as nn
-from loss.hard_example_mining import HEM
+from loss.hard_example_mining import HEM, HEM_MSSIM_L1
 from datetime import datetime
-import matplotlib
+import time
 
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
-from loss.ssim import MS_SSIM_LOSS
+from scipy.ndimage.filters import uniform_filter1d
+from loss.ssim import MS_SSIM
 
 class Loss(nn.modules.loss._Loss):
     def __init__(self, args, ckp):
@@ -23,11 +23,29 @@ class Loss(nn.modules.loss._Loss):
         self.lr_finder = args.lr_finder
         self.loss = []
         self.loss_module = nn.ModuleList()
+        frames_per_stage_list = [0,1,5,9]
+        self.stages = (args.n_sequence // 2)
+        self.frames_per_stage = frames_per_stage_list[self.stages]
+
+        if self.stages == 1: 
+            self.stage_average = [1]
+            self.stage_list = [[0]]
+        elif self.stages == 2: 
+            self.stage_average = [3,1]
+            self.stage_list = [[0,1,2],
+                               [3]]
+        elif self.stages == 3: 
+            self.stage_average = [5,3,1]
+            self.stage_list = [[0,1,2,3,4],
+                               [5,6,7],
+                               [8]]
 
         if args.LossL1HEM:
             loss_string = args.loss
-        else:
+        elif args.LossMslL1:
             loss_string = args.loss_MSL
+        else:
+            loss_string = args.loss_HEM_MSL
 
         for loss in loss_string.split('+'):
             weight, loss_type = loss.split('*')
@@ -38,7 +56,9 @@ class Loss(nn.modules.loss._Loss):
             elif loss_type == 'HEM':
                 loss_function = HEM(device=device)
             elif loss_type == 'MSL':
-                loss_function = MS_SSIM_LOSS(data_range=args.rgb_range, channel=args.n_channel)
+                loss_function = MS_SSIM(data_range=args.rgb_range, channel=args.n_channel)
+            elif loss_type == 'HML':
+                loss_function = HEM_MSSIM_L1(device=device, rbg_range=args.rgb_range, channel=args.n_channel)
             elif loss_type.find('VGG') >= 0:
                 module = import_module('loss.vgg')
                 loss_function = getattr(module, 'VGG')()
@@ -78,30 +98,33 @@ class Loss(nn.modules.loss._Loss):
             self.load(ckp.dir, cpu=args.cpu)
 
     def forward(self, sr, hr):
-        losses = []
-        start_time = datetime.now()
-        for i, l in enumerate(self.loss):
-            if l['function'] is not None:
-                start_time_function = datetime.now()
-                loss = l['function'](sr, hr)
-                losses.append(l['weight'] * loss)
-                if not self.lr_finder:
-                    self.log[-1, i, 0] += loss.item()
-                    self.log[-1, i, 1] = l['weight']
-                    self.log[-1, i, 2] += (datetime.now() - start_time_function).total_seconds()
-            elif l['type'] == 'DIS' and not self.lr_finder:
-                start_time_function = datetime.now()
-                self.log[-1, i, 0] += self.loss[i - 1]['function'].loss
-                self.log[-1, i, 1] = l['weight']
-                self.log[-1, i, 2] += (datetime.now() - start_time_function).total_seconds()
-
-        loss_sum = sum(losses)
-        if len(self.loss) > 1 and not self.lr_finder:
-            self.log[-1, -1, 0] += loss_sum.item()
-            self.log[-1, -1, 1] = 0
-            self.log[-1, -1, 2] += (datetime.now() - start_time).total_seconds()
-
-        return loss_sum
+        output_images = torch.chunk(sr, self.frames_per_stage, dim=1)
+        gt_images = torch.chunk(hr, self.frames_per_stage, dim=1)
+        loss_sum = []
+        for stage in range(self.stages):
+            losses = []
+            for i, l in enumerate(self.loss):
+                if l['function'] is not None:
+                    loss = 0
+                    for n in self.stage_list[stage]:
+                        if l['type'] == 'MSL':
+                            loss += 1 - l['function'](output_images[n], gt_images[n])
+                        else:
+                            loss += l['function'](output_images[n], gt_images[n])
+                    loss /= self.stage_average[stage]
+                    losses.append(l['weight'] * loss)
+                    if not self.lr_finder:
+                        self.log[-1, i, stage] += loss.detach().cpu().numpy()
+                elif l['type'] == 'DIS' and not self.lr_finder:
+                    self.log[-1, i, stage] += self.loss[i - 1]['function'].loss
+            loss_sum.append(sum(losses))
+            if len(self.loss) > 1 and not self.lr_finder:
+                self.log[-1, -1, stage] += loss_sum[stage].detach().cpu().numpy()
+        if self.lr_finder:
+            loss_avg = sum(loss_sum)/len(loss_sum)
+            return loss_avg
+        else:
+            return loss_sum
 
     def step(self):
         for l in self.get_loss_module():
@@ -109,83 +132,155 @@ class Loss(nn.modules.loss._Loss):
                 l.scheduler.step()
 
     def start_log(self):
-        self.log = torch.cat((self.log, torch.zeros([1, len(self.loss), 3])))
+        self.log = torch.cat((self.log, torch.zeros([1, len(self.loss), self.stages])))
 
     def end_log(self, n_batches):
-        self.log[-1,:,0].div_(n_batches)
+        self.log[-1,:,:].div_(n_batches)
 
     def display_loss(self, batch):
         n_samples = batch + 1
         log = []
         for l, c in zip(self.loss, self.log[-1]):
+            loss = 0
             if l['type'] == 'MSL':
-                log.append('[{}: {:.2f}(1 - {:.6f})]'.format('MS-SSIM', l['weight'], 1 - (c[0] / n_samples)))
+                for stage in range(self.stages):
+                    loss += c[stage]
+                log.append('[{}: {:.2f}(1 - {:.6f})]'.format('MS-SSIM', l['weight'], 1 - (loss / (n_samples * self.stages))))
             elif l['type'] == 'Total':
-                log.append('[{}: {:.6f}]'.format(l['type'], c[0] / n_samples))
+                for stage in range(self.stages):
+                    loss += c[stage]
+                log.append('[{}: {:.6f}]'.format(l['type'], loss / (n_samples * self.stages)))
             else:
-                log.append('[{}: {:.2f}({:.6f})]'.format(l['type'], l['weight'], c[0] / n_samples))
+                for stage in range(self.stages):
+                    loss += c[stage]
+                log.append('[{}: {:.2f}({:.6f})]'.format(l['type'], l['weight'], loss / (n_samples * self.stages)))
 
         return ''.join(log)
+
+    def display_loss_stage(self, batch, stage):
+        n_samples = batch + 1
+        log = []
+        for l, c in zip(self.loss, self.log[-1]):
+            loss = 0
+            if l['type'] == 'MSL':
+                loss += c[stage]
+                log.append('[{}: {:.2f}(1 - {:.6f})]'.format('MS-SSIM', l['weight'], 1 - (loss / n_samples)))
+            elif l['type'] == 'Total':
+                loss += c[stage]
+                log.append('[{}: {:.6f}]'.format(l['type'], loss / n_samples))
+            else:
+                loss += c[stage]
+                log.append('[{}: {:.2f}({:.6f})]'.format(l['type'], l['weight'], loss / n_samples))
+
+        return ''.join(log)
+
 
     def plot_loss(self, apath, epoch):
         if epoch > 1:
             axis = np.linspace(1, epoch, epoch)
-            #fig = plt.figure()
-            fig, ax1 = plt.subplots()
-            ax2 = ax1.twinx()
-            plt.title('Loss Functions')
+            fig = plt.figure(figsize=(38.4,21.6))
+            plt.rcParams.update({'font.size': 20})
+            plt.title('Loss Functions (Training)')
+            MSSSIM = []
             for i, l in enumerate(self.loss):
-                loss_label = '{} Loss'.format(l['type'])
-                weight_label = '{} Weight'.format(l['type'])
-                ax1.plot(axis, self.log[:, i, 0].numpy(), label=loss_label)
-                if l['type'] != 'Total':
-                    ax2.plot(axis, self.log[:, i, 1].numpy(), ':',label=weight_label)
-                if l['type'] == 'MSL':
-                    #weight_label = 'MS-SSIM'
-                    #ax2.plot(axis, 1 - self.log[:, i, 0].numpy(), '--',label=weight_label)
-                    MSSSIM = 1 - self.log[:, i, 0].numpy()
-            lines, labels = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            plt.legend(lines + lines2, labels + labels2)
-            #plt.legend(handles = (lines,lines2),
-            #           labels = (labels,labels2),
-            #           loc = 'best')
+                for stage in range(self.stages):
+                    if l['type'] == 'Total':
+                        loss_label = '{} Loss ({})'.format(l['type'], stage+1)
+                    else:
+                        loss_label = '{}*{} Loss ({})'.format(l['weight'], l['type'], stage+1)
+                    plt.plot(axis, self.log[:, i, stage].numpy(), label=loss_label)
+                    if l['type'] == 'MSL':
+                        MSSSIM.append(1 - self.log[:, i, stage])
+            plt.legend()
             plt.xlabel('Epochs')
-            ax1.set_ylabel('Loss')
-            ax2.set_ylabel('Weight') 
-            ax1.grid(True)
-            #plt.grid(True)
+            plt.ylabel('Loss')
+            plt.grid(True)
             fig.tight_layout()
-            plt.savefig('{}/loss.png'.format(apath), dpi=300)
+            try:
+                plt.savefig('{}/loss.png'.format(apath), dpi=100)
+            except:
+                plt.savefig('{}/loss-{}.png'.format(apath, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
             plt.close(fig)
+            plt.close()
             
             if MSSSIM is not None:
-                label = 'MS-SSIM'
-                fig = plt.figure()
-                plt.title(label)
-                plt.plot(axis, MSSSIM, label=label)
+                fig = plt.figure(figsize=(38.4,21.6))
+                plt.rcParams.update({'font.size': 20})
+                plt.title('MS-SSIM (Training)')
+                for stage in range(self.stages):
+                    gain_label = 'Stage {}'.format(stage+1)
+                    plt.plot(axis, MSSSIM[stage].numpy(), label=gain_label)
                 plt.xlabel('Epochs')
-                plt.ylabel(label)
+                plt.ylabel('MS-SSIM')
+                plt.legend()
                 plt.grid(True)
-                plt.savefig('{}/{}.png'.format(apath, label), dpi=300)  
+                fig.tight_layout()
+                try:
+                    plt.savefig('{}/MS-SSIM.png'.format(apath), dpi=100)
+                except:
+                    plt.savefig('{}/MS-SSIM-{}.png'.format(apath, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
                 plt.close(fig)
+                plt.close()
+    
+    def plot_iteration_loss(self, loss_array, lr_array, apath, iterations, epoch, stages, running_average):
+        round_length = round(running_average / 2)
+        if len(lr_array) + round_length < iterations:
+            fill_length = iterations - len(lr_array) - round_length
+            reflect_length = -(round_length + 1)
+        elif len(lr_array) < iterations:
+            fill_length = 0
+            reflect_length = len(lr_array)-iterations-1
 
-            #axis = np.linspace(1, epoch, epoch)
-            #for i, l in enumerate(self.loss):
-            #    label = '{} Loss'.format(l['type'])
-            #    fig = plt.figure()
-            #    plt.title(label)
-            #    plt.plot(axis, self.log[:, i].numpy(), label=label)
-            #    plt.legend()
-            #    plt.xlabel('Epochs')
-            #    plt.ylabel('Loss')
-            #    plt.grid(True)
-            #    plt.savefig('{}/loss_loss_{}.pdf'.format(apath, l['type']))            
-            #    plt.close(fig)
-            
-            
-            
-            
+        if len(lr_array) < iterations:
+            loss_array      = np.concatenate((loss_array,
+                                              loss_array[:reflect_length:-1,:],
+                                              np.full((fill_length,
+                                                       stages),
+                                                      np.average(loss_array[:reflect_length:-1,:],
+                                                                 axis=0))))
+            lr_array        = np.concatenate((lr_array,
+                                              lr_array[:reflect_length:-1],
+                                              np.full((fill_length),
+                                                      np.average(lr_array[:reflect_length:-1]))))
+        axis = np.linspace(1, iterations, iterations)
+        # Increase the size of the figure to give more detail to the graph
+        # Default is [6.4, 4.8] inches. 38.4"x21.6" @ 100dpi = 3840x2160 = 4K resolution
+        fig_kw = {'figsize': [38.4,21.6]}
+        # Increase the font-size from 10 to 20
+        plt.rcParams.update({'font.size': 20})
+        fig, ax1 = plt.subplots(**fig_kw)
+        ax2 = ax1.twinx()
+        plt.title('Loss Running average per {} iterations'.format(running_average))
+        plt.ticklabel_format(axis="y",style="sci",scilimits=(0,0))
+        for stage in range(stages):
+            ax1.plot(axis,
+                     uniform_filter1d(loss_array[:,stage],
+                                      mode = 'mirror',
+                                      size = running_average),
+                     label='Loss Stage {}'.format(stage+1))
+        ax2.plot(axis, lr_array, ':', label='Learning Rate')
+        lines, labels = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        plt.legend(lines + lines2, labels + labels2)
+        plt.xlabel('Iterations')
+        ax1.set_ylabel('Loss')
+        ax2.set_ylabel('LR')
+        ax1.grid(True)
+        fig.tight_layout()
+        try:
+            plt.savefig('{}/average_loss_epoch_{:03d}.png'.format(apath,
+                                                                  epoch),
+                        dpi=100)
+        except:
+            plt.savefig('{}/average_loss_epoch_{:03d}-{}.png'.format(apath,
+                                                                  epoch,
+                                                                  time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())),
+                        dpi=100)
+        plt.close(fig)
+        plt.close()
+
+
+
     def get_loss_module(self):
         if self.n_GPUs == 1:
             return self.loss_module

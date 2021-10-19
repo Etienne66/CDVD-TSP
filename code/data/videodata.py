@@ -1,10 +1,12 @@
 import os
+import sys
 import glob
 import numpy as np
 import imageio
 import torch
 import torch.utils.data as data
 import utils.utils as utils
+from pathlib import Path
 
 class VIDEODATA(data.Dataset):
     def __init__(self, args, name='', train=True):
@@ -17,13 +19,23 @@ class VIDEODATA(data.Dataset):
         print("n_frames_per_video:", args.n_frames_per_video)
 
         self.n_frames_video = []
+        self.images_gt = []
+        self.images_input = []
 
         if train:
-            self._set_filesystem(args.dir_data)
+            for image_dataset in args.dir_data.split(','):
+                dir_data = Path('../dataset') / image_dataset / 'train'
+                self._set_filesystem(dir_data, name=image_dataset)
+                images_gt, images_input = self._scan()
+                self.images_gt += images_gt
+                self.images_input += images_input
         else:
-            self._set_filesystem(args.dir_data_test)
-
-        self.images_gt, self.images_input = self._scan()
+            for image_dataset in args.dir_data_test.split(','):
+                dir_data = Path('../dataset') / image_dataset / 'test'
+                self._set_filesystem(dir_data, name=image_dataset)
+                images_gt, images_input = self._scan()
+                self.images_gt += images_gt
+                self.images_input += images_input
 
         self.num_video = len(self.images_gt)
         self.num_frame = sum(self.n_frames_video) - (self.n_seq - 1) * len(self.n_frames_video)
@@ -37,29 +49,23 @@ class VIDEODATA(data.Dataset):
         if args.process:
             self.data_gt, self.data_input = self._load(self.images_gt, self.images_input)
 
-    def _set_filesystem(self, dir_data):
-        print("Loading {} => {} DataSet".format("train" if self.train else "test", self.name))
-        self.apath = dir_data
-        self.dir_gt = os.path.join(self.apath, 'GT')
-        self.dir_input = os.path.join(self.apath, 'INPUT')
-        print("DataSet GT path:", self.dir_gt)
-        print("DataSet INPUT path:", self.dir_input)
-
     def _scan(self):
-        vid_gt_names = sorted(glob.glob(os.path.join(self.dir_gt, '*')))
-        vid_input_names = sorted(glob.glob(os.path.join(self.dir_input, '*')))
+        vid_gt_names = sorted(self.dir_gt.iterdir())
+        vid_input_names = sorted(self.dir_input.iterdir())
         assert len(vid_gt_names) == len(vid_input_names), "len(vid_gt_names) must equal len(vid_input_names)"
 
         images_gt = []
         images_input = []
 
         for vid_gt_name, vid_input_name in zip(vid_gt_names, vid_input_names):
+            # Use map to perform the str function on each element. The result is a map object.
+            # Use list on map object to change to a list array.
             if self.train:
-                gt_dir_names = sorted(glob.glob(os.path.join(vid_gt_name, '*')))[:self.args.n_frames_per_video]
-                input_dir_names = sorted(glob.glob(os.path.join(vid_input_name, '*')))[:self.args.n_frames_per_video]
+                gt_dir_names = list(map(str, sorted(vid_gt_name.iterdir())[:self.args.n_frames_per_video]))
+                input_dir_names = list(map(str, sorted(vid_input_name.iterdir())[:self.args.n_frames_per_video]))
             else:
-                gt_dir_names = sorted(glob.glob(os.path.join(vid_gt_name, '*')))
-                input_dir_names = sorted(glob.glob(os.path.join(vid_input_name, '*')))
+                gt_dir_names = list(map(str, sorted(vid_gt_name.iterdir())))
+                input_dir_names = list(map(str, sorted(vid_input_name.iterdir())))
             images_gt.append(gt_dir_names)
             images_input.append(input_dir_names)
             self.n_frames_video.append(len(gt_dir_names))
@@ -74,10 +80,12 @@ class VIDEODATA(data.Dataset):
         for idx in range(n_videos):
             if idx % 10 == 0:
                 print("Loading video %d" % idx)
-            gts = np.array([imageio.imread(hr_name) for hr_name in images_gt[idx]])
-            inputs = np.array([imageio.imread(lr_name) for lr_name in images_input[idx]])
-            data_input.append(inputs)
-            data_gt.append(gts)
+            #gts = np.array([imageio.imread(hr_name) for hr_name in images_gt[idx]])
+            #inputs = np.array([imageio.imread(lr_name) for lr_name in images_input[idx]])
+            #data_input.append(inputs)
+            #data_gt.append(gts)
+            data_input.append(np.asarray([imageio.imread(hr_name) for hr_name in images_gt[idx]]))
+            data_gt.append(np.asarray([imageio.imread(lr_name) for lr_name in images_input[idx]]))
 
         return data_gt, data_input
 
@@ -87,19 +95,10 @@ class VIDEODATA(data.Dataset):
         else:
             inputs, gts, filenames = self._load_file(idx)
 
-        inputs_list = [inputs[i, :, :, :] for i in range(self.n_seq)]
-        inputs_concat = np.concatenate(inputs_list, axis=2)
-        gts_list = [gts[i, :, :, :] for i in range(self.n_seq)]
-        gts_concat = np.concatenate(gts_list, axis=2)
-        inputs_concat, gts_concat = self.get_patch(inputs_concat, gts_concat, self.args.size_must_mode)
-        inputs_list = [inputs_concat[:, :, i*self.args.n_colors:(i+1)*self.args.n_colors] for i in range(self.n_seq)]
-        gts_list = [gts_concat[:, :, i*self.args.n_colors:(i+1)*self.args.n_colors] for i in range(self.n_seq)]
-        # 0:3 3:6 6:9 9:12 12:15
-        inputs = np.array(inputs_list)
-        gts = np.array(gts_list)
+        inputs_patch, gts_patch = self.get_patch_frames(inputs, gts, self.args.size_must_mode)
         
-        input_tensors = utils.np2Tensor(*inputs, rgb_range=self.args.rgb_range, n_colors=self.args.n_colors)
-        gt_tensors = utils.np2Tensor(*gts, rgb_range=self.args.rgb_range, n_colors=self.args.n_colors)
+        input_tensors = utils.np2Tensor(*inputs_patch, rgb_range=self.args.rgb_range)
+        gt_tensors = utils.np2Tensor(*gts_patch, rgb_range=self.args.rgb_range)
         
         return torch.stack(input_tensors), torch.stack(gt_tensors), filenames
 
@@ -129,8 +128,8 @@ class VIDEODATA(data.Dataset):
         video_idx, frame_idx = self._find_video_num(idx, n_poss_frames)
         f_gts = self.images_gt[video_idx][frame_idx:frame_idx + self.n_seq]
         f_inputs = self.images_input[video_idx][frame_idx:frame_idx + self.n_seq]
-        gts = np.array([imageio.imread(hr_name) for hr_name in f_gts])
-        inputs = np.array([imageio.imread(lr_name) for lr_name in f_inputs])
+        gts = np.asarray([imageio.imread(hr_name) for hr_name in f_gts])
+        inputs = np.asarray([imageio.imread(lr_name) for lr_name in f_inputs])
         filenames = [os.path.split(os.path.dirname(name))[-1] + '.' + os.path.splitext(os.path.basename(name))[0]
                      for name in f_inputs]
 
@@ -152,14 +151,32 @@ class VIDEODATA(data.Dataset):
         if self.train:
             if not self.args.no_patch:
                 input, gt = utils.get_patch(input, gt, patch_size=self.args.patch_size)
-            h, w, c = input.shape
-            new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
-            input, gt = input[:new_h, :new_w, :], gt[:new_h, :new_w, :]
-            
+            elif size_must_mode > 1:
+                h, w, c = input.shape
+                new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
+                input, gt = input[:new_h, :new_w, :], gt[:new_h, :new_w, :]
+
             if not self.args.no_augment and not self.args.no_patch:
                 input, gt = utils.data_augment(input, gt)
         else:
             h, w, c = input.shape
             new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
             input, gt = input[:new_h, :new_w, :], gt[:new_h, :new_w, :]
+        return input, gt
+
+    def get_patch_frames(self, input, gt, size_must_mode=1):
+        if self.train:
+            if not self.args.no_patch:
+                input, gt = utils.get_patch_frames(input, gt, patch_size=self.args.patch_size)
+            elif size_must_mode > 1:
+                _, h, w, c = input.shape
+                new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
+                input, gt = input[:, :new_h, :new_w, :], gt[:, :new_h, :new_w, :]
+
+            if not self.args.no_augment and not self.args.no_patch:
+                input, gt = utils.data_augment_frames(input, gt)
+        else:
+            _, h, w, c = input.shape
+            new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
+            input, gt = input[:, :new_h, :new_w, :], gt[:, :new_h, :new_w, :]
         return input, gt

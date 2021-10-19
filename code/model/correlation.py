@@ -4,12 +4,12 @@ import torch
 import cupy
 import re
 
-# begin added by csbhr
 class Stream:
+    r""" begin added by csbhr    
+    """
     ptr = torch.cuda.current_stream().cuda_stream
-
-
 # end
+
 
 kernel_Correlation_rearrange = '''
 	extern "C" __global__ void kernel_Correlation_rearrange(
@@ -26,7 +26,7 @@ kernel_Correlation_rearrange = '''
 	  int intSample = blockIdx.z;
 	  int intChannel = blockIdx.y;
 
-	  float dblValue = input[(((intSample * SIZE_1(input)) + intChannel) * SIZE_2(input) * SIZE_3(input)) + intIndex];
+	  float fltValue = input[(((intSample * SIZE_1(input)) + intChannel) * SIZE_2(input) * SIZE_3(input)) + intIndex];
 
 	  __syncthreads();
 
@@ -34,7 +34,7 @@ kernel_Correlation_rearrange = '''
 	  int intPaddedX = (intIndex % SIZE_3(input)) + 4;
 	  int intRearrange = ((SIZE_3(input) + 8) * intPaddedY) + intPaddedX;
 
-	  output[(((intSample * SIZE_1(output) * SIZE_2(output)) + intRearrange) * SIZE_1(input)) + intChannel] = dblValue;
+	  output[(((intSample * SIZE_1(output) * SIZE_2(output)) + intRearrange) * SIZE_1(input)) + intChannel] = fltValue;
 	}
 '''
 
@@ -240,6 +240,10 @@ kernel_Correlation_updateGradSecond = '''
 
 
 def cupy_kernel(strFunction, objectVariables):
+    r""" Duplicate function from `correlation.py` of
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
     strKernel = globals()[strFunction]
 
     while True:
@@ -269,8 +273,7 @@ def cupy_kernel(strFunction, objectVariables):
 
         strTensor = strArgs[0]
         intStrides = objectVariables[strTensor].stride()
-        strIndex = ['((' + strArgs[intArg + 1].replace('{', '(').replace('}', ')').strip() + ')*' + str(
-            intStrides[intArg]) + ')' for intArg in range(intArgs)]
+        strIndex = ['((' + strArgs[intArg + 1].replace('{', '(').replace('}', ')').strip() + ')*' + str(intStrides[intArg]) + ')' for intArg in range(intArgs)]
 
         strKernel = strKernel.replace(objectMatch.group(0), strTensor + '[' + str.join('+', strIndex) + ']')
     # end
@@ -278,28 +281,27 @@ def cupy_kernel(strFunction, objectVariables):
     return strKernel
 
 
-# end
+# end cupy_kernel
 
-#cupy v9.0.0a1/v8.0.0 Rename cupy.util submodule to cupy._util (#3779)/(#3938)
-try:
-    @cupy._util.memoize(for_each_device=True)
-    def cupy_launch(strFunction, strKernel):
-        return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
-except:
-    @cupy.util.memoize(for_each_device=True)
-    def cupy_launch(strFunction, strKernel):
-        return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
-
-
+# cupy v9.0.0a1/v8.0.0 Rename cupy.util submodule to cupy._util (#3779)/(#3938)
+@cupy.memoize(for_each_device=True)
+def cupy_launch(strFunction, strKernel):
+    r""" Duplicate function from `correlation.py` of
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
+    return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
 # end
 
 class _FunctionCorrelation(torch.autograd.Function):
+    r""" Duplicate class from `correlation.py` of
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
     @staticmethod
     def forward(self, first, second):
-        rbot0 = first.new_zeros([first.shape[0], first.shape[2] + 8, first.shape[3] + 8, first.shape[1]])
-        rbot1 = first.new_zeros([first.shape[0], first.shape[2] + 8, first.shape[3] + 8, first.shape[1]])
-
-        self.save_for_backward(first, second, rbot0, rbot1)
+        rbot0 =  first.new_zeros([ first.shape[0],  first.shape[2] + 8,  first.shape[3] + 8,  first.shape[1]])
+        rbot1 = second.new_zeros([second.shape[0], second.shape[2] + 8, second.shape[3] + 8, second.shape[1]])
 
         first = first.contiguous(); assert(first.is_cuda == True)
         second = second.contiguous(); assert(second.is_cuda == True)
@@ -308,48 +310,60 @@ class _FunctionCorrelation(torch.autograd.Function):
 
         if first.is_cuda == True:
             n = first.shape[2] * first.shape[3]
-            cupy_launch('kernel_Correlation_rearrange', cupy_kernel('kernel_Correlation_rearrange', {
-                'input': first,
-                'output': rbot0
-            }))(
-                grid=tuple([int((n + 16 - 1) / 16), first.shape[1], first.shape[0]]),
-                block=tuple([16, 1, 1]),
-                args=[n, first.data_ptr(), rbot0.data_ptr()],
-                stream=Stream # added by csbhr
-            )
+            cupy_launch('kernel_Correlation_rearrange',
+                        cupy_kernel('kernel_Correlation_rearrange',
+                                    {'input':  first,
+                                     'output': rbot0}
+                                   )
+                       )(grid   = tuple([int((n + 16 - 1) / 16), first.shape[1], first.shape[0]]),
+                         block  = tuple([16, 1, 1]),
+                         args   = [cupy.int32(n),
+                                   first.data_ptr(),
+                                   rbot0.data_ptr()],
+                         stream = Stream # added by csbhr
+                        )
 
             n = second.shape[2] * second.shape[3]
-            cupy_launch('kernel_Correlation_rearrange', cupy_kernel('kernel_Correlation_rearrange', {
-                'input': second,
-                'output': rbot1
-            }))(
-                grid=tuple([int((n + 16 - 1) / 16), second.shape[1], second.shape[0]]),
-                block=tuple([16, 1, 1]),
-                args=[n, second.data_ptr(), rbot1.data_ptr()],
-                stream=Stream # added by csbhr
-            )
+            cupy_launch('kernel_Correlation_rearrange',
+                        cupy_kernel('kernel_Correlation_rearrange',
+                                    {'input':  second,
+                                     'output': rbot1}
+                                   )
+                       )(grid   = tuple([int((n + 16 - 1) / 16), second.shape[1], second.shape[0]]),
+                         block  = tuple([16, 1, 1]),
+                         args   = [cupy.int32(n),
+                                   second.data_ptr(),
+                                   rbot1.data_ptr()],
+                         stream = Stream # added by csbhr
+                        )
 
             n = output.shape[1] * output.shape[2] * output.shape[3]
-            cupy_launch('kernel_Correlation_updateOutput', cupy_kernel('kernel_Correlation_updateOutput', {
-                'rbot0': rbot0,
-                'rbot1': rbot1,
-                'top': output
-            }))(
-                grid=tuple([output.shape[3], output.shape[2], output.shape[0]]),
-                block=tuple([32, 1, 1]),
-                shared_mem=first.shape[1] * 4,
-                args=[n, rbot0.data_ptr(), rbot1.data_ptr(), output.data_ptr()],
-                stream=Stream # added by csbhr
-            )
+            cupy_launch('kernel_Correlation_updateOutput',
+                        cupy_kernel('kernel_Correlation_updateOutput',
+                                    {'rbot0': rbot0,
+                                     'rbot1': rbot1,
+                                     'top':   output}
+                                    )
+                       )(grid       = tuple([output.shape[3], output.shape[2], output.shape[0]]),
+                         block      = tuple([32, 1, 1]),
+                         shared_mem = first.shape[1] * 4,
+                         args       = [cupy.int32(n),
+                                       rbot0.data_ptr(),
+                                       rbot1.data_ptr(),
+                                       output.data_ptr()],
+                         stream     = Stream # added by csbhr
+                        )
 
         elif first.is_cuda == False:
             raise NotImplementedError()
 
         # end
 
+        self.save_for_backward(first, second, rbot0, rbot1)
+
         return output
 
-    # end
+    # end_def_forward
 
     @staticmethod
     def backward(self, gradOutput):
@@ -357,49 +371,63 @@ class _FunctionCorrelation(torch.autograd.Function):
 
         gradOutput = gradOutput.contiguous(); assert(gradOutput.is_cuda == True)
 
-        gradFirst = first.new_zeros([first.shape[0], first.shape[1], first.shape[2], first.shape[3]]) if \
-        self.needs_input_grad[0] == True else None
-        gradSecond = first.new_zeros([first.shape[0], first.shape[1], first.shape[2], first.shape[3]]) if \
-        self.needs_input_grad[1] == True else None
+        gradFirst = first.new_zeros([first.shape[0],
+                                     first.shape[1],
+                                     first.shape[2],
+                                     first.shape[3]]) if self.needs_input_grad[0] == True else None
+        gradSecond = second.new_zeros([second.shape[0],
+                                       second.shape[1],
+                                       second.shape[2],
+                                       second.shape[3]]) if self.needs_input_grad[1] == True else None
 
         if first.is_cuda == True:
             if gradFirst is not None:
                 for intSample in range(first.shape[0]):
                     n = first.shape[1] * first.shape[2] * first.shape[3]
                     cupy_launch('kernel_Correlation_updateGradFirst',
-                                cupy_kernel('kernel_Correlation_updateGradFirst', {
-                                    'rbot0': rbot0,
-                                    'rbot1': rbot1,
-                                    'gradOutput': gradOutput,
-                                    'gradFirst': gradFirst,
-                                    'gradSecond': None
-                                }))(
-                        grid=tuple([int((n + 512 - 1) / 512), 1, 1]),
-                        block=tuple([512, 1, 1]),
-                        args=[n, intSample, rbot0.data_ptr(), rbot1.data_ptr(), gradOutput.data_ptr(),
-                              gradFirst.data_ptr(), None],
-                        stream=Stream # added by csbhr
-                    )
-            # end
+                                cupy_kernel('kernel_Correlation_updateGradFirst',
+                                            {'rbot0': rbot0,
+                                             'rbot1': rbot1,
+                                             'gradOutput': gradOutput,
+                                             'gradFirst': gradFirst,
+                                             'gradSecond': None}
+                                           )
+                               )(grid=tuple([int((n + 512 - 1) / 512), 1, 1]),
+                                 block=tuple([512, 1, 1]),
+                                 args=[cupy.int32(n),
+                                       cupy.int32(intSample),
+                                       rbot0.data_ptr(),
+                                       rbot1.data_ptr(),
+                                       gradOutput.data_ptr(),
+                                       gradFirst.data_ptr(),
+                                       None],
+                                 stream=Stream # added by csbhr
+                                )
+                # end
             # end
 
             if gradSecond is not None:
-                for intSample in range(first.shape[0]):
-                    n = first.shape[1] * first.shape[2] * first.shape[3]
+                for intSample in range(second.shape[0]):
+                    n = second.shape[1] * second.shape[2] * second.shape[3]
                     cupy_launch('kernel_Correlation_updateGradSecond',
-                                cupy_kernel('kernel_Correlation_updateGradSecond', {
-                                    'rbot0': rbot0,
-                                    'rbot1': rbot1,
-                                    'gradOutput': gradOutput,
-                                    'gradFirst': None,
-                                    'gradSecond': gradSecond
-                                }))(
-                        grid=tuple([int((n + 512 - 1) / 512), 1, 1]),
-                        block=tuple([512, 1, 1]),
-                        args=[n, intSample, rbot0.data_ptr(), rbot1.data_ptr(), gradOutput.data_ptr(), None,
-                              gradSecond.data_ptr()],
-                        stream=Stream # added by csbhr
-                    )
+                                cupy_kernel('kernel_Correlation_updateGradSecond',
+                                            {'rbot0': rbot0,
+                                             'rbot1': rbot1,
+                                             'gradOutput': gradOutput,
+                                             'gradFirst': None,
+                                             'gradSecond': gradSecond}
+                                           )
+                               )(grid=tuple([int((n + 512 - 1) / 512), 1, 1]),
+                                 block=tuple([512, 1, 1]),
+                                 args=[cupy.int32(n),
+                                       cupy.int32(intSample),
+                                       rbot0.data_ptr(),
+                                       rbot1.data_ptr(),
+                                       gradOutput.data_ptr(),
+                                       None,
+                                       gradSecond.data_ptr()],
+                                 stream=Stream # added by csbhr
+                                )
             # end
         # end
 
@@ -409,24 +437,27 @@ class _FunctionCorrelation(torch.autograd.Function):
         # end
 
         return gradFirst, gradSecond
-# end
-
-
-# end
+    # end_def_backward
+# end_FunctionCorrelation
 
 def FunctionCorrelation(tensorFirst, tensorSecond):
+    r""" Duplicate function from `correlation.py` of
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
     return _FunctionCorrelation.apply(tensorFirst, tensorSecond)
-
-
-# end
+# end_FunctionCorrelation
 
 class ModuleCorrelation(torch.nn.Module):
+    r""" Duplicate class from `correlation.py` of
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
     def __init__(self):
         super(ModuleCorrelation, self).__init__()
-
-    # end
+    # end__init__
 
     def forward(self, tensorFirst, tensorSecond):
         return _FunctionCorrelation.apply(tensorFirst, tensorSecond)
-# end
-# end
+    # end_forward
+# end_ModuleCorrelation

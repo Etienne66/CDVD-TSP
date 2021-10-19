@@ -3,19 +3,21 @@ import torch
 import glob
 import numpy as np
 import imageio
-import cv2
+import cv2 #OpenCV
 import math
 import time
 import argparse
 import platform
 from model.cdvd_tsp import CDVD_TSP
-
+from pathlib import Path
+from loss.ssim import ssim as ssim_2
+from utils import utils
 
 class Traverse_Logger:
     def __init__(self, result_dir, filename='inference_log.txt'):
-        self.log_file_path = os.path.join(result_dir, filename)
-        open_type = 'a' if os.path.exists(self.log_file_path) else 'w'
-        self.log_file = open(self.log_file_path, open_type, buffering=1)
+        self.log_file_path = result_dir / filename
+        open_type = 'a' if self.log_file_path.exists else 'w'
+        self.log_file = self.log_file_path.open(mode=open_type, buffering=1)
 
     def write_log(self, log):
         print(log)
@@ -30,19 +32,18 @@ class Inference:
         self.model_path = args.model_path
         self.data_path = args.data_path
         self.result_path = args.result_path
-        #self.n_seq = 5
         self.n_seq = args.n_seq
         self.size_must_mode = 4
         self.device = 'cuda'
 
-        if not os.path.exists(self.result_path):
-            os.mkdir(self.result_path)
+        if not self.result_path.is_dir():
+            self.result_path.mkdir()
             print('mkdir: {}'.format(self.result_path))
 
-        self.input_path = os.path.join(self.data_path, "blur")
-        self.GT_path = os.path.join(self.data_path, "gt")
+        self.input_path = self.data_path / "blur"
+        self.GT_path = self.data_path / "gt"
 
-        now_time = time.localtime()
+        now_time = time.gmtime()
         now_time_file = time.strftime("%Y-%m-%d", now_time) + "T" + time.strftime("%H%M%S", now_time)
         now_time_log = time.strftime("%Y-%m-%d %H:%M:%S", now_time)
         self.logger = Traverse_Logger(self.result_path, 'inference_log_{}.txt'.format(now_time_file))
@@ -72,15 +73,33 @@ class Inference:
 
     def infer(self):
         torch.backends.cudnn.benchmark = True
+        stages = self.n_seq // 2
+        
+        # This is to pick the same middle frame from each stage
+        if stages == 3:
+            image_list = [2, 6, 8]
+            output_frames = 9
+        elif stages == 2:
+            image_list = [1, 3]
+            output_frames = 4
+        elif stages == 1:
+            image_list = [0]
+            output_frames = 1
         with torch.no_grad():
             total_psnr = {}
             total_ssim = {}
-            videos = sorted(os.listdir(self.input_path))
+            #total_ssim2 = {}
+            #videos = sorted(os.listdir(self.input_path))
+            videos = sorted(self.input_path.iterdir())
             for v in videos:
                 video_psnr = []
                 video_ssim = []
-                input_frames = sorted(glob.glob(os.path.join(self.input_path, v, "*")))
-                gt_frames = sorted(glob.glob(os.path.join(self.GT_path, v, "*")))
+                #video_ssim2 = []
+                
+                #input_frames = sorted(glob.glob(self.input_path / v / "*"))
+                #gt_frames = sorted(glob.glob(self.GT_path / v / "*"))
+                input_frames = sorted((self.input_path / v.name).iterdir())
+                gt_frames = sorted((self.GT_path / v.name).iterdir())
 
                 if len(gt_frames) != 0:
                     input_seqs = self.gene_seq(input_frames, n_seq=self.n_seq)
@@ -88,38 +107,43 @@ class Inference:
 
                     for in_seq, gt_seq in zip(input_seqs, gt_seqs):
                         start_time = time.time()
-                        filename = os.path.basename(in_seq[self.n_seq // 2]).split('.')[0]
-                        inputs = [imageio.imread(p) for p in in_seq]
+                        #filename = os.path.basename(in_seq[self.n_seq // 2]).split('.')[0]
+                        filename = in_seq[self.n_seq // 2].stem
+                        #print(in_seq)
+                        inputs = [imageio.imread(str(p)) for p in in_seq]
 
                         h, w, c = inputs[self.n_seq // 2].shape
                         new_h, new_w = h - h % self.size_must_mode, w - w % self.size_must_mode
                         inputs = [im[:new_h, :new_w, :] for im in inputs]
-                        #print(len(inputs))
-                        #exit()
 
                         in_tensor = self.numpy2tensor(inputs).to(self.device)
                         preprocess_time = time.time()
                         output = self.net(in_tensor)
                         forward_time = time.time()
-                        output_img = self.tensor2numpy(output)
+                        output_images = torch.chunk(output, output_frames, dim=1)
                         gt = imageio.imread(gt_seq[self.n_seq // 2])
                         gt = gt[:new_h, :new_w, :]
+                        #gt_Tensor = torch.unsqueeze(utils.np2Tensor(gt, rgb_range=1.)[0].to(self.device), 0)
 
-                        psnr, ssim = self.get_PSNR_SSIM(output_img, gt)
-                        video_psnr.append(psnr)
-                        video_ssim.append(ssim)
-                        total_psnr[v] = video_psnr
-                        total_ssim[v] = video_ssim
+                        for stage in range(stages):
+                            output_img = self.tensor2numpy(output_images[image_list[stage]])
+                            psnr, ssim = self.get_PSNR_SSIM(output_img, gt)
+                            video_psnr.append(psnr)
+                            video_ssim.append(ssim)
+                            total_psnr[v.name] = video_psnr
+                            total_ssim[v.name] = video_ssim
+                            self.logger.write_log('> {}-{} Stage:{} PSNR={:.5}, SSIM={:.4}'.format(v.name, filename, stage, psnr, ssim))
 
                         if self.save_image:
-                            if not os.path.exists(os.path.join(self.result_path, v)):
-                                os.mkdir(os.path.join(self.result_path, v))
-                            imageio.imwrite(os.path.join(self.result_path, v, '{}.png'.format(filename)), output_img)
+                            if not (self.result_path / v.name).is_dir():
+                                (self.result_path / v.name).mkdir()
+                                print("mkdir: ", self.result_path / v.name)
+                            imageio.imwrite(self.result_path / v.name / '{}.png'.format(filename), output_img)
                         postprocess_time = time.time()
 
                         self.logger.write_log(
-                            '> {}-{} PSNR={:.5}, SSIM={:.4} pre_time:{:.3}s, forward_time:{:.3}s, post_time:{:.3}s, total_time:{:.3}s'
-                                .format(v, filename, psnr, ssim,
+                            '> {}-{} pre_time:{:.3}s, forward_time:{:.3}s, post_time:{:.3}s, total_time:{:.3}s'
+                                .format(v.name, filename,
                                         preprocess_time - start_time,
                                         forward_time - preprocess_time,
                                         postprocess_time - forward_time,
@@ -144,7 +168,7 @@ class Inference:
 
                     for in_seq in input_seqs:
                         start_time = time.time()
-                        filename = os.path.basename(in_seq[self.n_seq // 2]).split('.')[0]
+                        filename = in_seq[self.n_seq // 2].stem
                         inputs = [imageio.imread(p) for p in in_seq]
 
                         h, w, c = inputs[self.n_seq // 2].shape
@@ -155,32 +179,38 @@ class Inference:
                         preprocess_time = time.time()
                         output = self.net(in_tensor)
                         forward_time = time.time()
+                        output_images = torch.chunk(output, output_frames, dim=1)
 
-                        output_img = self.tensor2numpy(output)
-                        if not os.path.exists(os.path.join(self.result_path, v)):
-                            os.mkdir(os.path.join(self.result_path, v))
-                        imageio.imwrite(os.path.join(self.result_path, v, '{}.png'.format(filename)), output_img)
+                        output_img = self.tensor2numpy(output_images[image_list[-1]])
+                        if not (self.result_path / v.name).is_dir():
+                            (self.result_path / v.name).mkdir()
+                        imageio.imwrite(self.result_path / v.name / '{}.png'.format(filename), output_img)
                         postprocess_time = time.time()
 
                         self.logger.write_log(
                             '> {}-{} pre_time:{:.3}s, forward_time:{:.3}s, post_time:{:.3}s, total_time:{:.3}s'
-                                .format(v, filename,
+                                .format(v.name, filename,
                                         preprocess_time - start_time,
                                         forward_time - preprocess_time,
                                         postprocess_time - forward_time,
                                         postprocess_time - start_time))
             sum_psnr = 0.
             sum_ssim = 0.
+            sum_ssim2 = 0.
             n_img = 0
             for k in total_psnr.keys():
                 if len(total_psnr[k]) != 0:
                     self.logger.write_log("# Video:{} AVG-PSNR={:.5}, AVG-SSIM={:.4}".format(
                         k, sum(total_psnr[k]) / len(total_psnr[k]), sum(total_ssim[k]) / len(total_ssim[k])))
+                    #self.logger.write_log("# Video:{} AVG-PSNR={:.5}, AVG-SSIM={:.4}, AVG-SSIM2={:.4}".format(
+                    #    k, sum(total_psnr[k]) / len(total_psnr[k]), sum(total_ssim[k]) / len(total_ssim[k]), sum(total_ssim2[k]) / len(total_ssim2[k])))
                 sum_psnr += sum(total_psnr[k])
                 sum_ssim += sum(total_ssim[k])
+                #sum_ssim2 += sum(total_ssim2[k])
                 n_img += len(total_psnr[k])
             if n_img != 0:
-                self.logger.write_log("# Total AVG-PSNR={:.5}, AVG-SSIM={:.4}".format(sum_psnr / n_img, sum_ssim / n_img))
+                self.logger.write_log("# Total AVG-PSNR={:.5}, AVG-SSIM={:.4}, AVG-SSIM2={:.4}".format(sum_psnr / n_img, sum_ssim / n_img))
+                #self.logger.write_log("# Total AVG-PSNR={:.5}, AVG-SSIM={:.4}, AVG-SSIM2={:.4}".format(sum_psnr / n_img, sum_ssim / n_img, sum_ssim2 / n_img))
 
     def gene_seq(self, img_list, n_seq):
         if self.border:
@@ -230,11 +260,11 @@ class Inference:
             return float('inf')
         return 20 * math.log10(255.0 / math.sqrt(mse))
 
-#https://cvnote.ddlee.cc/2019/09/12/psnr-ssim-python
     def calc_SSIM(self, img1, img2):
         '''calculate SSIM
         the same outputs as MATLAB's
         img1, img2: [0, 255]
+        https://cvnote.ddlee.cc/2019/09/12/psnr-ssim-python
         '''
 
         def ssim(img1, img2):
@@ -278,48 +308,37 @@ class Inference:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='CDVD-TSP-Inference')
 
-    parser.add_argument('--save_image', action='store_true', help='save image if true')
-    parser.add_argument('--border', action='store_true', help='restore border images of video if true')
-
-    parser.add_argument('--default_data', type=str, default='.',
-                        help='quick test, optional: DVD, GOPRO')
+    parser.add_argument('--save_image', action='store_true',
+                        help='save image if true')
+    parser.add_argument('--border', action='store_true',
+                        help='restore border images of video if true')
     parser.add_argument('--n_seq', type=int, default=5,
                         help='number of frames to evaluate for 1 output frame')
-
-    if platform.system() == 'Windows':
-        parser.add_argument('--data_path', type=str, default='..\dataset\DVD\test',
-                            help='the path of test data')
-        parser.add_argument('--model_path', type=str, default='..\pretrain_models\CDVD_TSP_DVD_Convergent.pt',
-                            help='the path of pretrain model')
-        parser.add_argument('--result_path', type=str, default='..\infer_results',
-                            help='the path of deblur result')
-    else:
-        parser.add_argument('--data_path', type=str, default='../dataset/DVD/test',
-                            help='the path of test data')
-        parser.add_argument('--model_path', type=str, default='../pretrain_models/CDVD_TSP_DVD_Convergent.pt',
-                            help='the path of pretrain model')
-        parser.add_argument('--result_path', type=str, default='../infer_results',
-                            help='the path of deblur result')
+    parser.add_argument('--default_data', type=str, default='.',
+                        help='quick test, optional: DVD, GOPRO')
+    parser.add_argument('--data_path', type=Path, default=Path('../dataset/DVD/test'),
+                        help='the path of test data')
+    parser.add_argument('--model_path', type=Path, default=Path('../pretrain_models/CDVD_TSP_DVD_Convergent.pt'),
+                        help='the path of pretrain model')
+    parser.add_argument('--result_path', type=Path, default=Path('../infer_results'),
+                        help='the path of deblur result')
     args = parser.parse_args()
 
     if args.default_data == 'DVD':
-        if platform.system() == 'Windows':
-            args.data_path = '..\dataset\DVD\test'
-            args.model_path = '..\pretrain_models\CDVD_TSP_DVD_Convergent.pt'
-            args.result_path = '..\infer_results\DVD'
-        else:
-            args.data_path = '../dataset/DVD/test'
-            args.model_path = '../pretrain_models/CDVD_TSP_DVD_Convergent.pt'
-            args.result_path = '../infer_results/DVD'
+        args.data_path = Path('../dataset/DVD/test')
+        args.model_path = Path('../pretrain_models/CDVD_TSP_DVD_Convergent.pt')
+        args.result_path = Path('../infer_results/DVD')
     elif args.default_data == 'GOPRO':
-        if platform.system() == 'Windows':
-            args.data_path = '..\dataset\GOPRO\test'
-            args.model_path = '..\pretrain_models\CDVD_TSP_GOPRO.pt'
-            args.result_path = '..\infer_results\GOPRO'
-        else:
-            args.data_path = '../dataset/GOPRO/test'
-            args.model_path = '../pretrain_models/CDVD_TSP_GOPRO.pt'
-            args.result_path = '../infer_results/GOPRO'
+        args.data_path = Path('../dataset/GOPRO/test')
+        args.model_path = Path('../pretrain_models/CDVD_TSP_GOPRO.pt')
+        args.result_path = Path('../infer_results/GOPRO')
+    elif args.default_data == 'REDS':
+        # There is no model trained on the REDS dataset
+        args.data_path = Path('../dataset/REDS/test')
+        args.model_path = Path('../pretrain_models/CDVD_TSP_DVD_Convergent.pt')
+        args.result_path = Path('../infer_results/REDS')
 
+    args.use_checkpoint = False
+    
     Infer = Inference(args)
     Infer.infer()

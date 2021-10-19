@@ -15,7 +15,7 @@ def _fspecial_gauss_1d(size, sigma):
     Returns:
         torch.Tensor: 1D kernel (1 x 1 x size)
     """
-    coords = torch.arange(size).to(dtype=torch.float)
+    coords = torch.arange(size, dtype=torch.float)
     coords -= size // 2
 
     g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
@@ -55,7 +55,6 @@ def gaussian_filter(input, win):
 
 
 def _ssim(X, Y, data_range, win, size_average=True, K=(0.01, 0.03)):
-
     r""" Calculate ssim index for X and Y
 
     Args:
@@ -203,7 +202,8 @@ def ms_ssim(
 
     if weights is None:
         weights = [0.0448, 0.2856, 0.3001, 0.2363, 0.1333]
-    weights = torch.FloatTensor(weights).to(X.device, dtype=X.dtype)
+    #weights = torch.FloatTensor(weights).to(X.device, dtype=X.dtype)
+    weights = torch.tensor(weights, device=X.device, dtype=X.dtype)
 
     if win is None:
         win = _fspecial_gauss_1d(win_size, win_sigma)
@@ -314,58 +314,4 @@ class MS_SSIM(torch.nn.Module):
             weights=self.weights,
             K=self.K,
         )
-
-
-class MS_SSIM_LOSS(torch.nn.Module):
-    def __init__(
-        self,
-        data_range=1,
-        size_average=True,
-        win_size=11,
-        win_sigma=1.5,
-        channel=3,
-        spatial_dims=2,
-        weights=None,
-        K=(0.01, 0.03),
-    ):
-        r""" class for ms-ssim
-        Args:
-            data_range (float or int, optional): value range of input images. (usually 1.0 or 255)
-            size_average (bool, optional): if size_average=True, ssim of all images will be averaged as a scalar
-            win_size: (int, optional): the size of gauss kernel
-            win_sigma: (float, optional): sigma of normal distribution
-            channel (int, optional): input channels (default: 3)
-            weights (list, optional): weights for different levels
-            K (list or tuple, optional): scalar constants (K1, K2). Try a larger K2 constant (e.g. 0.4) if you get a negative or NaN results.
-        """
-
-        super(MS_SSIM_LOSS, self).__init__()
-        self.win_size = win_size
-        self.win = _fspecial_gauss_1d(win_size, win_sigma).repeat([channel, 1] + [1] * spatial_dims)
-        self.size_average = size_average
-        self.data_range = data_range
-        self.weights = weights
-        self.K = K
-
-    def forward(self, X, Y):
-        #MSSSIMLOSS = 1 - ms_ssim(
-        #    X,
-        #    Y,
-        #    data_range=self.data_range,
-        #    size_average=self.size_average,
-        #    win=self.win,
-        #    weights=self.weights,
-        #    K=self.K,
-        #)
-        one_tensor = torch.tensor([1]).to(X.device, dtype=X.dtype)
-        MSSSIMLOSS = one_tensor.sub_(ms_ssim(
-            X,
-            Y,
-            data_range=self.data_range,
-            size_average=self.size_average,
-            win=self.win,
-            weights=self.weights,
-            K=self.K,
-        ))
-        return MSSSIMLOSS
 

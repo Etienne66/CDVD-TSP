@@ -1,14 +1,15 @@
 import torch.nn as nn
 import torch
 import model.blocks as blocks
-
+import torch.utils.checkpoint as checkpoint
 
 def make_model(args):
-    return RECONS_VIDEO(in_channels  = args.n_colors,
-                        n_sequence   = args.n_sequence,
-                        out_channels = args.n_colors,
-                        n_resblock   = args.n_resblock,
-                        n_feat       = args.n_feat)
+    return RECONS_VIDEO(in_channels    = args.n_colors,
+                        n_sequence     = args.n_sequence,
+                        out_channels   = args.n_colors,
+                        n_resblock     = args.n_resblock,
+                        n_feat         = args.n_feat,
+                        use_checkpoint = args.use_checkpoint)
 
 
 class RECONS_VIDEO(nn.Module):
@@ -22,11 +23,13 @@ class RECONS_VIDEO(nn.Module):
                  kernel_size    = 5,
                  extra_channels = 0,
                  feat_in        = False,
-                 n_in_feat      = 1):
+                 n_in_feat      = 1,
+                 use_checkpoint = False):
         super(RECONS_VIDEO, self).__init__()
         print("Creating Recons-Video Net")
 
         self.feat_in = feat_in
+        self.use_checkpoint = use_checkpoint
 
         if not extra_channels == 0:
             print("SRN Video Net extra in channels: {}".format(extra_channels))
@@ -91,18 +94,53 @@ class RECONS_VIDEO(nn.Module):
         self.decoder_first = nn.Sequential(*Decoder_first)
         self.outBlock = nn.Sequential(*OutBlock)
 
+    def custom(self, module):
+        """ This is used for Checkpointing
+            See the following website for more information
+            https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
+        """
+        def custom_forward(*inputs):
+            inputs = module(inputs[0])
+            return inputs
+        return custom_forward
+
     def forward(self, x):
         if x.ndimension() == 5:
             b, n, c, h, w = x.size()
             frame_list = [x[:, i, :, :, :] for i in range(n)]
             x = torch.cat(frame_list, dim=1)
 
-        first_scale_inblock = self.inBlock(x)
-        first_scale_encoder_first = self.encoder_first(first_scale_inblock)
-        first_scale_encoder_second = self.encoder_second(first_scale_encoder_first)
-        first_scale_decoder_second = self.decoder_second(first_scale_encoder_second)
-        first_scale_decoder_first = self.decoder_first(first_scale_decoder_second + first_scale_encoder_first)
-        first_scale_outBlock = self.outBlock(first_scale_decoder_first + first_scale_inblock)
+        if self.use_checkpoint and self.training:
+            # Using a dummy tensor to avoid the error:
+            #       UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+            # NOTE: In case of checkpointing, if all the inputs don't require grad but the outputs do, then if the inputs are
+            #       passed as is, the output of Checkpoint will be variable which don't require grad and autograd tape will
+            #       break there. To get around, you can pass a dummy input which requires grad but isn't necessarily used in
+            #       computation.
+            dummy_tensor = torch.zeros(1, requires_grad=True)
+            first_scale_inblock = checkpoint.checkpoint(self.custom(self.inBlock),x)
+            first_scale_encoder_first = checkpoint.checkpoint(self.custom(self.encoder_first),
+                                                              first_scale_inblock,
+                                                              dummy_tensor)
+            first_scale_encoder_second = checkpoint.checkpoint(self.custom(self.encoder_second),
+                                                               first_scale_encoder_first,
+                                                               dummy_tensor)
+            first_scale_decoder_second = checkpoint.checkpoint(self.custom(self.decoder_second),
+                                                               first_scale_encoder_second,
+                                                               dummy_tensor)
+            first_scale_decoder_first = checkpoint.checkpoint(self.custom(self.decoder_first),
+                                                              first_scale_decoder_second + first_scale_encoder_first,
+                                                              dummy_tensor)
+            first_scale_outBlock = checkpoint.checkpoint(self.custom(self.outBlock),
+                                                         first_scale_decoder_first + first_scale_inblock,
+                                                         dummy_tensor)
+        else:
+            first_scale_inblock = self.inBlock(x)
+            first_scale_encoder_first = self.encoder_first(first_scale_inblock)
+            first_scale_encoder_second = self.encoder_second(first_scale_encoder_first)
+            first_scale_decoder_second = self.decoder_second(first_scale_encoder_second)
+            first_scale_decoder_first = self.decoder_first(first_scale_decoder_second + first_scale_encoder_first)
+            first_scale_outBlock = self.outBlock(first_scale_decoder_first + first_scale_inblock)
 
         mid_loss = None
 

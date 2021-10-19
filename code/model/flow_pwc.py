@@ -5,26 +5,34 @@ from torch.autograd import Variable
 import sys
 import math
 from utils import utils
-
-try:
-    from model import correlation
-except:
-    sys.path.insert(0, './correlation')
-    import correlation  # you should consider upgrading python
-# end
+from model import correlation
+import torch.utils.checkpoint as checkpoint
 
 
 def make_model(args):
+    """ This does not appear to be used """
     device = 'cpu' if args.cpu else 'cuda'
     pretrain_fn = args.pretrain_models_dir + 'network-default.pytorch'
-    return Flow_PWC(load_pretrain=True, pretrain_fn=pretrain_fn, device=device)
+    return Flow_PWC(load_pretrain  = True,
+                    pretrain_fn    = pretrain_fn,
+                    device         = device,
+                    use_checkpoint = args.use_checkpoint)
 
 
 class Flow_PWC(nn.Module):
-    def __init__(self, load_pretrain=False, pretrain_fn='', device='cuda'):
-        self.device = device
+    r""" Derivative of `run.py` from
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
+    def __init__(self,
+                 load_pretrain  = False,
+                 pretrain_fn    = '',
+                 device         = 'cuda',
+                 use_checkpoint = False):
         super(Flow_PWC, self).__init__()
-        self.moduleNetwork = Network()
+        self.device = device
+        self.use_checkpoint = use_checkpoint
+        self.moduleNetwork = Network(use_checkpoint = self.use_checkpoint)
         print("Creating Flow PWC")
 
         if load_pretrain:
@@ -37,19 +45,22 @@ class Flow_PWC(nn.Module):
         intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
         intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
 
-        tensorPreprocessedFirst = torch.nn.functional.interpolate(input=tensorFirst,
-                                                                  size=(intPreprocessedHeight, intPreprocessedWidth),
-                                                                  mode='bilinear', align_corners=False)
-        tensorPreprocessedSecond = torch.nn.functional.interpolate(input=tensorSecond,
-                                                                   size=(intPreprocessedHeight, intPreprocessedWidth),
-                                                                   mode='bilinear', align_corners=False)
+        tensorPreprocessedFirst = torch.nn.functional.interpolate(input         = tensorFirst,
+                                                                  size          = (intPreprocessedHeight,
+                                                                                   intPreprocessedWidth),
+                                                                  mode          = 'bilinear',
+                                                                  align_corners = False)
+        tensorPreprocessedSecond = torch.nn.functional.interpolate(input         = tensorSecond,
+                                                                   size          = (intPreprocessedHeight,
+                                                                                    intPreprocessedWidth),
+                                                                   mode          = 'bilinear',
+                                                                   align_corners = False)
 
-        outputFlow = self.moduleNetwork(tensorPreprocessedFirst, tensorPreprocessedSecond)
-
-        tensorFlow = 20.0 * torch.nn.functional.interpolate(input=outputFlow,
-                                                            size=(intHeight, intWidth),
-                                                            mode='bilinear',
-                                                            align_corners=False)
+        tensorFlow = torch.nn.functional.interpolate(input         = self.moduleNetwork(tensorPreprocessedFirst,
+                                                                                        tensorPreprocessedSecond),
+                                                     size          = (intHeight, intWidth),
+                                                     mode          = 'bilinear',
+                                                     align_corners = False)
 
         tensorFlow[:, 0, :, :] *= float(intWidth) / float(intPreprocessedWidth)
         tensorFlow[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
@@ -57,20 +68,24 @@ class Flow_PWC(nn.Module):
         return tensorFlow
 
     def warp(self, x, flo):
-        """
+        """ Not part of `run.py` in pytorch-pwc
         warp an image/tensor (im2) back to im1, according to the optical flow
             x: [B, C, H, W] (im2)
             flo: [B, 2, H, W] flow
         """
         B, C, H, W = x.size()
         # mesh grid
-        xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
-        yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
+        #xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
+        #yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
+        xx = torch.arange(0, W, device=self.device, dtype=torch.float32, requires_grad=True).view(1, -1).repeat(H, 1)
+        yy = torch.arange(0, H, device=self.device, dtype=torch.float32, requires_grad=True).view(-1, 1).repeat(1, W)
         xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
         yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
-        grid = torch.cat((xx, yy), 1).float()
-        grid = grid.to(self.device)
-        vgrid = Variable(grid) + flo
+        #grid = torch.cat((xx, yy), 1).float()
+        #grid = grid.to(self.device)
+        #vgrid = Variable(grid) + flo
+        grid = torch.cat((xx, yy), 1)
+        vgrid = grid.add_(flo)
 
         # scale grid to [-1,1]
         vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
@@ -81,44 +96,54 @@ class Flow_PWC(nn.Module):
         # Code was developed for 0.4.1
         output = nn.functional.grid_sample(x,
                                            vgrid,
-                                           padding_mode='border',
-                                           align_corners=False)
-        mask = torch.autograd.Variable(torch.ones(x.size())).cuda()
+                                           padding_mode  = 'border',
+                                           align_corners = False)
+        #mask = torch.autograd.Variable(torch.ones(x.size())).cuda()
+        mask = torch.ones_like(x,
+                               device        = self.device,
+                               requires_grad = True)
         mask = nn.functional.grid_sample(mask,
                                          vgrid,
-                                         align_corners=False)
+                                         align_corners = False)
 
         mask[mask < 0.999] = 0
         mask[mask > 0] = 1
 
         output = output * mask
 
+
         return output, mask
 
     def forward(self, frame_1, frame_2):
+        r""" Not part of `run.py` in pytorch-pwc
+            - Find the flow between Frame 1 and Frame 2
+            - Warp Frame 2 to the same position as Frame 1
+        """
         # flow
         flow = self.estimate_flow(frame_1, frame_2)
 
-        # the gradient of frame_2
-        _, _, frame_2_grad = utils.calc_grad_sobel(frame_2.detach(), self.device)
-
         # warp
-        frame_2_grad_warp, _ = self.warp(frame_2_grad, flow.detach())
         frame_2_warp, mask = self.warp(frame_2, flow)
 
-        return frame_2_warp, flow, frame_2_grad_warp, mask
+
+        return frame_2_warp, flow, mask
     # end
 
 ##########################################################
 
-def Backwarp(tensorInput, tensorFlow, device='cuda'):
-    Backwarp_tensorGrid = {}
-    Backwarp_tensorPartial = {}
+Backwarp_tensorGrid = {}
+Backwarp_tensorPartial = {}
 
+def Backwarp(tensorInput, tensorFlow, device='cuda'):
+    r""" Duplicate function from `run.py` from
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
     if str(tensorFlow.shape) not in Backwarp_tensorGrid:
         tensorHorizontal = torch.linspace(-1.0 + (1.0 / tensorFlow.shape[3]),
                                           1.0 - (1.0 / tensorFlow.shape[3]),
-                                          tensorFlow.shape[3]
+                                          tensorFlow.shape[3],
+                                          device=device
                                          ).view(1,
                                                 1,
                                                 1,
@@ -129,7 +154,8 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                                         -1)
         tensorVertical = torch.linspace(-1.0  + (1.0 / tensorFlow.shape[2]),
                                         1.0 - (1.0 / tensorFlow.shape[2]),
-                                        tensorFlow.shape[2]
+                                        tensorFlow.shape[2],
+                                        device=device
                                        ).view(1,
                                               1,
                                               -1,
@@ -138,8 +164,8 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                                       -1,
                                                       -1,
                                                       tensorFlow.shape[3])
-
-        Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1).to(device)
+        #Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1).to(device)
+        Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1)
     # end
 
     if str(tensorFlow.size()) not in Backwarp_tensorPartial:
@@ -156,7 +182,6 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                                    mode='bilinear',
                                                    padding_mode='zeros',
                                                    align_corners=False)
-
     tensorMask = tensorOutput[:, -1:, :, :];
     tensorMask[tensorMask > 0.999] = 1.0;
     tensorMask[tensorMask < 1.0] = 0.0
@@ -167,10 +192,24 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
 ##########################################################
 
 class Network(torch.nn.Module):
-    def __init__(self, device='cuda'):
+    r""" Duplicate class from `run.py` of
+    [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
+    
+    """
+    def __init__(self,
+                 device = 'cuda',
+                 use_checkpoint = False):
         super(Network, self).__init__()
+        self.use_checkpoint = use_checkpoint
+
 
         class Extractor(torch.nn.Module):
+            r""" The feature pyramid extractor network. The first image (t = 1)
+                 and the second image (t =2) are encoded using the same Siamese net-
+                 work. Each convolution is followed by a leaky ReLU unit. The convolu-
+                 tional layer and the ×2 downsampling layer at each level is implemented
+                 using a single convolutional layer with a stride of 2. c denotes extracted features of image t at level l
+              """
             def __init__(self):
                 super(Extractor, self).__init__()
 
@@ -242,57 +281,93 @@ class Network(torch.nn.Module):
         # end
 
         class Decoder(torch.nn.Module):
+            r""" Each convolutional layer is followed by a leaky ReLU unit except the last
+                 one that outputs the optical flow.
+            """
             def __init__(self, intLevel):
                 super(Decoder, self).__init__()
 
-                intPrevious = \
-                    [None, None, 81 + 32 + 2 + 2, 81 + 64 + 2 + 2, 81 + 96 + 2 + 2, 81 + 128 + 2 + 2, 81, None][
-                        intLevel + 1]
-                intCurrent = \
-                    [None, None, 81 + 32 + 2 + 2, 81 + 64 + 2 + 2, 81 + 96 + 2 + 2, 81 + 128 + 2 + 2, 81, None][
-                        intLevel + 0]
+                intPrevious = [None,
+                               None,
+                               81 + 32 + 2 + 2,
+                               81 + 64 + 2 + 2,
+                               81 + 96 + 2 + 2,
+                               81 + 128 + 2 + 2,
+                               81,
+                               None][intLevel + 1]
+                intCurrent = [None,
+                              None,
+                              81 + 32 + 2 + 2,
+                              81 + 64 + 2 + 2,
+                              81 + 96 + 2 + 2,
+                              81 + 128 + 2 + 2,
+                              81,
+                              None][intLevel + 0]
 
                 if intLevel < 6:
-                    self.moduleUpflow = torch.nn.ConvTranspose2d(in_channels=2, out_channels=2,
-                                                                 kernel_size=4, stride=2, padding=1)
-                if intLevel < 6:
-                    self.moduleUpfeat = torch.nn.ConvTranspose2d(
-                        in_channels=intPrevious + 128 + 128 + 96 + 64 + 32, out_channels=2, kernel_size=4, stride=2,
-                        padding=1)
-                if intLevel < 6:
+                    self.moduleUpflow = torch.nn.ConvTranspose2d(in_channels  = 2,
+                                                                 out_channels = 2,
+                                                                 kernel_size  = 4,
+                                                                 stride       = 2,
+                                                                 padding      = 1)
+                    self.moduleUpfeat = torch.nn.ConvTranspose2d(in_channels  = intPrevious + 128 + 128 + 96 + 64 + 32,
+                                                                 out_channels = 2,
+                                                                 kernel_size  = 4,
+                                                                 stride       = 2,
+                                                                 padding      = 1)
                     self.dblBackwarp = [None, None, None, 5.0, 2.5, 1.25, 0.625, None][intLevel + 1]
 
                 self.moduleOne = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=intCurrent, out_channels=128, kernel_size=3, stride=1, padding=1),
+                    torch.nn.Conv2d(in_channels  = intCurrent,
+                                    out_channels = 128,
+                                    kernel_size  = 3,
+                                    stride       = 1,
+                                    padding      = 1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
 
                 self.moduleTwo = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=intCurrent + 128, out_channels=128, kernel_size=3, stride=1, padding=1),
+                    torch.nn.Conv2d(in_channels  = intCurrent + 128,
+                                    out_channels = 128,
+                                    kernel_size  = 3,
+                                    stride       = 1,
+                                    padding      = 1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
 
                 self.moduleThr = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=intCurrent + 128 + 128, out_channels=96, kernel_size=3, stride=1,
-                                    padding=1),
+                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128,
+                                    out_channels = 96,
+                                    kernel_size  = 3,
+                                    stride       = 1,
+                                    padding      = 1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
 
                 self.moduleFou = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=intCurrent + 128 + 128 + 96, out_channels=64, kernel_size=3, stride=1,
-                                    padding=1),
+                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96,
+                                    out_channels = 64,
+                                    kernel_size  = 3,
+                                    stride       = 1,
+                                    padding      = 1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
 
                 self.moduleFiv = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=intCurrent + 128 + 128 + 96 + 64, out_channels=32, kernel_size=3,
-                                    stride=1, padding=1),
+                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96 + 64,
+                                    out_channels = 32,
+                                    kernel_size  = 3,
+                                    stride       = 1,
+                                    padding      = 1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
 
                 self.moduleSix = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=intCurrent + 128 + 128 + 96 + 64 + 32, out_channels=2, kernel_size=3,
-                                    stride=1, padding=1)
+                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96 + 64 + 32,
+                                    out_channels = 2,
+                                    kernel_size  = 3,
+                                    stride       = 1,
+                                    padding      = 1)
                 )
             # end
 
@@ -305,9 +380,10 @@ class Network(torch.nn.Module):
                     tensorFeat = None
 
                     tensorVolume = torch.nn.functional.leaky_relu(
-                        input=correlation.FunctionCorrelation(tensorFirst=tensorFirst, tensorSecond=tensorSecond),
-                        negative_slope=0.1,
-                        inplace=False)
+                        input          = correlation.FunctionCorrelation(tensorFirst  = tensorFirst,
+                                                                         tensorSecond = tensorSecond),
+                        negative_slope = 0.1,
+                        inplace        = False)
 
                     tensorFeat = torch.cat([tensorVolume], 1)
 
@@ -316,12 +392,12 @@ class Network(torch.nn.Module):
                     tensorFeat = self.moduleUpfeat(objectPrevious['tensorFeat'])
 
                     tensorVolume = torch.nn.functional.leaky_relu(
-                        input=correlation.FunctionCorrelation(tensorFirst=tensorFirst,
-                                                              tensorSecond=Backwarp(tensorInput=tensorSecond,
-                                                                                    tensorFlow=tensorFlow * self.dblBackwarp,
-                                                                                    device=device)),
-                        negative_slope=0.1,
-                        inplace=False)
+                        input          = correlation.FunctionCorrelation(tensorFirst  = tensorFirst,
+                                                                         tensorSecond = Backwarp(tensorInput = tensorSecond,
+                                                                                                 tensorFlow  = tensorFlow * self.dblBackwarp,
+                                                                                                 device      = device)),
+                        negative_slope = 0.1,
+                        inplace        = False)
 
                     tensorFeat = torch.cat([tensorVolume, tensorFirst, tensorFlow, tensorFeat], 1)
                 # end
@@ -342,6 +418,10 @@ class Network(torch.nn.Module):
         # end
 
         class Refiner(torch.nn.Module):
+            r""" Each convolutional layer is followed by a leaky ReLU unit except the last one
+                 that outputs the optical flow. The last number in each convolutional layer
+                 denotes the dilation constant.
+            """
             def __init__(self):
                 super(Refiner, self).__init__()
 
@@ -384,16 +464,70 @@ class Network(torch.nn.Module):
         #                                                                      file_name='pwc-' + arguments_strModel).items() })
     # end
 
+    def custom(self, module):
+        """ This is used for Checkpointing
+            See the following website for more information
+            https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
+        """
+        def custom_forward(*inputs):
+            if type(module) == type(self.moduleExtractor):
+                inputs = module(inputs[0])
+            else:
+                inputs = module(inputs[0], inputs[1], inputs[2])
+            return inputs
+        return custom_forward
+
     def forward(self, tensorFirst, tensorSecond):
-        tensorFirst = self.moduleExtractor(tensorFirst)
-        tensorSecond = self.moduleExtractor(tensorSecond)
+        if self.use_checkpoint and self.training:
+            # Using a dummy tensor to avoid the error:
+            #       UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+            # NOTE: In case of checkpointing, if all the inputs don't require grad but the outputs do, then if the inputs are
+            #       passed as is, the output of Checkpoint will be variable which don't require grad and autograd tape will
+            #       break there. To get around, you can pass a dummy input which requires grad but isn't necessarily used in
+            #       computation.
+            dummy_tensor = torch.zeros(1, requires_grad=True)
+            tensorFirst  = checkpoint.checkpoint(self.custom(self.moduleExtractor),
+                                                 tensorFirst,
+                                                 dummy_tensor)
+            tensorSecond = checkpoint.checkpoint(self.custom(self.moduleExtractor),
+                                                 tensorSecond,
+                                                 dummy_tensor)
 
-        objectEstimate = self.moduleSix(tensorFirst[-1], tensorSecond[-1], None)
-        objectEstimate = self.moduleFiv(tensorFirst[-2], tensorSecond[-2], objectEstimate)
-        objectEstimate = self.moduleFou(tensorFirst[-3], tensorSecond[-3], objectEstimate)
-        objectEstimate = self.moduleThr(tensorFirst[-4], tensorSecond[-4], objectEstimate)
-        objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
+            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleSix),
+                                                   tensorFirst[-1],
+                                                   tensorSecond[-1],
+                                                   None,
+                                                   dummy_tensor)
+            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleFiv),
+                                                   tensorFirst[-2],
+                                                   tensorSecond[-2],
+                                                   objectEstimate,
+                                                   dummy_tensor)
+            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleFou),
+                                                   tensorFirst[-3],
+                                                   tensorSecond[-3],
+                                                   objectEstimate,
+                                                   dummy_tensor)
+            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleThr),
+                                                   tensorFirst[-4],
+                                                   tensorSecond[-4],
+                                                   objectEstimate,
+                                                   dummy_tensor)
+            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleTwo),
+                                                   tensorFirst[-5],
+                                                   tensorSecond[-5],
+                                                   objectEstimate,
+                                                   dummy_tensor)
+        else:
+            tensorFirst  = self.moduleExtractor(tensorFirst)
+            tensorSecond = self.moduleExtractor(tensorSecond)
+            
+            objectEstimate = self.moduleSix(tensorFirst[-1], tensorSecond[-1], None)
+            objectEstimate = self.moduleFiv(tensorFirst[-2], tensorSecond[-2], objectEstimate)
+            objectEstimate = self.moduleFou(tensorFirst[-3], tensorSecond[-3], objectEstimate)
+            objectEstimate = self.moduleThr(tensorFirst[-4], tensorSecond[-4], objectEstimate)
+            objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
 
-        return objectEstimate['tensorFlow'] + self.moduleRefiner(objectEstimate['tensorFeat'])
+        return (objectEstimate['tensorFlow'] + self.moduleRefiner(objectEstimate['tensorFeat'])) * 20.0
     # end
 # end

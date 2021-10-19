@@ -1,5 +1,6 @@
 import os
 from importlib import import_module
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -10,6 +11,7 @@ class Model(nn.Module):
         super(Model, self).__init__()
         print('Making model...')
         self.args = args
+        self.pretrain_models_dir = Path(args.pretrain_models_dir)
         epoch = len(ckp.psnr_log)
         self.cpu = args.cpu
         self.device = torch.device('cpu' if args.cpu else 'cuda')
@@ -19,6 +21,7 @@ class Model(nn.Module):
         module = import_module('model.' + args.model.lower())
         self.model = module.make_model(args).to(self.device)
         if not args.cpu and args.n_GPUs > 1:
+            # Need to change to DistributedDataParallel
             self.model = nn.DataParallel(self.model, range(args.n_GPUs))
 
         self.load(
@@ -30,6 +33,8 @@ class Model(nn.Module):
         
         if not args.lr_finder and epoch == 0:
             print(self.get_model(), file=ckp.config_file)
+            ckp.config_file.close()
+
 
     def forward(self, *args):
         return self.model(*args)
@@ -68,12 +73,8 @@ class Model(nn.Module):
         else:
             kwargs = {}
 
-        if pre_train != '.':
-            print('Loading model from {}'.format(pre_train))
-            self.get_model().load_state_dict(
-                torch.load(pre_train, **kwargs), strict=False
-            )
-        elif resume:
+    # A resume takes precedence over test_only and test_only takes precedence over pre_train
+        if resume:
             print('Loading model from {}'.format(os.path.join(apath, 'model', 'model_latest.pt')))
             self.get_model().load_state_dict(
                 torch.load(os.path.join(apath, 'model', 'model_latest.pt'), **kwargs),
@@ -84,6 +85,12 @@ class Model(nn.Module):
             self.get_model().load_state_dict(
                 torch.load(os.path.join(apath, 'model', 'model_best.pt'), **kwargs),
                 strict=False
+            )
+        elif pre_train != '.':
+            pre_train = self.pretrain_models_dir / pre_train
+            print('Loading model from {}'.format(pre_train))
+            self.get_model().load_state_dict(
+                torch.load(pre_train, **kwargs), strict=False
             )
         else:
             pass

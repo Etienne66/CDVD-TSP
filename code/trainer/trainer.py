@@ -6,7 +6,8 @@ from datetime import datetime
 from torch_lr_finder import LRFinder, TrainDataLoaderIter, ValDataLoaderIter
 import matplotlib
 import matplotlib.pyplot as plt
-
+import random
+import numpy as np
 
 class CustomTrainIter(TrainDataLoaderIter):
     def inputs_labels_from_batch(self, input):
@@ -16,8 +17,17 @@ class CustomTrainIter(TrainDataLoaderIter):
         input_gpu = input[0]
         gt = input[1]
         n_sequence = len(input_gpu[0])
-        gt_gpu = gt[:, n_sequence // 2, :, :, :]
-        return input_gpu, gt_gpu
+        gt_list = [gt[:, i, :, :, :] for i in range(n_sequence)]
+        if n_sequence == 3:
+            gt_cat = torch.cat([gt_list[1]], dim=1)
+        elif n_sequence == 5:
+            gt_cat = torch.cat([gt_list[1], gt_list[2], gt_list[3],
+                                gt_list[2]], dim=1)
+        elif n_sequence == 7:
+            gt_cat = torch.cat([gt_list[1], gt_list[2], gt_list[3], gt_list[4], gt_list[5],
+                                gt_list[2], gt_list[3], gt_list[4],
+                                gt_list[3]], dim=1)
+        return input_gpu, gt_cat
 
 class CustomValIter(ValDataLoaderIter):
     def inputs_labels_from_batch(self, input):
@@ -43,22 +53,28 @@ class Trainer:
 
         if self.args.lr_finder:
             custom_train_iter = CustomTrainIter(self.loader_train)
+            fig_kw = {'figsize': [38.4,21.6]}
+            plt.rcParams.update({'font.size': 20})
             if self.args.lr_finder_Leslie_Smith:
                 custom_val_iter = CustomValIter(self.loader_test)
                 lr_finder = LRFinder(self.model, self.optimizer, self.loss, device="cuda")
                 lr_finder.range_test(custom_train_iter,
                                      val_loader = custom_val_iter,
                                      end_lr     = self.args.max_lr,
-                                     num_iter   = 1000,
+                                     num_iter   = 100,
                                      step_mode  = "linear")
-                lr_finder.plot()
+                fig, ax = plt.subplots(**fig_kw)
+                lr_finder.plot(ax=ax)
             else:
                 lr_finder = LRFinder(self.model, self.optimizer, self.loss, device="cuda")
                 lr_finder.range_test(custom_train_iter,
                                      end_lr   = self.args.max_lr,
                                      num_iter = 1000)
-                lr_finder.plot()
-            plt.savefig('{}/LRvsLoss.png'.format(args.experiment_dir + args.save), dpi=300)
+                fig, ax = plt.subplots(**fig_kw)
+                lr_finder.plot(ax=ax)
+            plt.grid(True)
+            fig.tight_layout()
+            fig.savefig('{}/LRvsLoss.png'.format(args.experiment_dir + args.save), dpi=100)
             plt.close()
             #lr_finder.reset()
 
@@ -73,33 +89,49 @@ class Trainer:
             self.args.total_test_time  = checkpoint['total_test_time']
             self.args.epochs_completed = checkpoint['epochs_completed']
             rng_state                  = checkpoint['rng_state']
+            random_state               = checkpoint['random_state']
+            numpy_random_state         = checkpoint['numpy_random_state']
             torch.set_rng_state(rng_state)
+            random.setstate(random_state)
+            np.random.set_state(numpy_random_state)
             self.args.start_time = datetime.now() - (self.args.total_test_time + self.args.total_train_time)
             print('total_train_time: {}'.format(self.args.total_train_time), file=ckp.config_file)
             print('total_test_time: {}'.format(self.args.total_test_time), file=ckp.config_file)
             print('epochs_completed: {}'.format(self.args.epochs_completed), file=ckp.config_file)
             print('start_time: {}'.format(self.args.start_time), file=ckp.config_file)
+            print('patch_size: {}'.format(self.args.patch_size), file=ckp.config_file)
+            ckp.config_file.close()
 
     def make_optimizer(self):
         if self.args.Adam:
             kwargs = {'lr': self.args.lr, 'weight_decay': self.args.weight_decay}
             return optim.Adam(self.model.parameters(), **kwargs)
-        else:
+        elif self.args.OneCycleLR or self.args.StepLR:
             kwargs = {'lr':             self.args.lr,
                       'weight_decay':   self.args.AdamW_weight_decay}
             return optim.AdamW(self.model.parameters(), **kwargs)
+        else:
+            kwargs = {'lr':           self.args.lr,
+                      'weight_decay': self.args.weight_decay,
+                      'momentum':     0.9}
+            return optim.SGD(self.model.parameters(), **kwargs)
 
     def make_scheduler(self):
         if self.args.StepLR:
-            kwargs = {'step_size': self.args.lr_decay, 'gamma': self.args.gamma}
+            kwargs = {'step_size': self.args.lr_decay,
+                      'gamma':     self.args.gamma}
             return lr_scheduler.StepLR(self.optimizer, **kwargs)
-        else:
+        elif self.args.OneCycleLR:
             div_factor = self.args.max_lr / self.args.lr
             kwargs = {'max_lr':          self.args.max_lr,
                       'epochs':          self.args.epochs,
                       'div_factor':      div_factor,
                       'steps_per_epoch': len(self.loader_train)}
             return lr_scheduler.OneCycleLR(self.optimizer, **kwargs)
+        else:
+            kwargs = {'base_lr': self.args.lr,
+                      'max_lr':  self.args.max_lr}
+            return lr_scheduler.CyclicLR(self.optimizer, **kwargs)
 
     def train(self):
         pass
