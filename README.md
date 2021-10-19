@@ -6,7 +6,7 @@
 
 #### [Paper](https://arxiv.org/abs/2004.02501) | [Project Page](https://csbhr.github.io/projects/cdvd-tsp/index.html) | [Discussion](https://github.com/csbhr/CDVD-TSP/issues)
 ### Cascaded Deep Video Deblurring Using Temporal Sharpness Prior[[1](#user-content-citation-1)]
-By [Jinshan Pan](https://jspan.github.io/), [Haoran Bai](https://csbhr.github.io/about), and Jinhui Tang
+By [Jinshan Pan](https://jspan.github.io/), [Haoran Bai](https://csbhr.github.io/), and Jinhui Tang
 
 ## Experimental Results
 Our algorithm is motivated by the success of variational model-based methods. It explores sharpness pixels from adjacent frames by a temporal sharpness prior (see (f)) and restores sharp videos by a cascaded inference process. As our analysis shows, enforcing the temporal sharpness prior in a deep convolutional neural network (CNN) and learning the deep CNN by a cascaded inference manner can make the deep CNN more compact and thus generate better-deblurred results than both the CNN-based methods [27, 32] and variational model-based method [12].
