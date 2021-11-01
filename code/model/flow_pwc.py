@@ -60,7 +60,8 @@ class Flow_PWC(nn.Module):
                                                                                         tensorPreprocessedSecond),
                                                      size          = (intHeight, intWidth),
                                                      mode          = 'bilinear',
-                                                     align_corners = False)
+                                                     align_corners = False
+                                                    ) * 20.0
 
         tensorFlow[:, 0, :, :] *= float(intWidth) / float(intPreprocessedWidth)
         tensorFlow[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
@@ -521,6 +522,6 @@ class Network(torch.nn.Module):
             objectEstimate = self.moduleThr(tensorFirst[-4], tensorSecond[-4], objectEstimate)
             objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
 
-        return (objectEstimate['tensorFlow'] + self.moduleRefiner(objectEstimate['tensorFeat'])) * 20.0
+        return objectEstimate['tensorFlow'] + self.moduleRefiner(objectEstimate['tensorFeat'])
     # end
 # end
