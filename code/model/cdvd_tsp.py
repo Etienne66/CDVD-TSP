@@ -10,7 +10,7 @@ def make_model(args):
 # No need to load the pretrained flow network if doing a resume or loading a pretrained deblur model
     load_flow_net = False if args.resume or args.pre_train != '.' else True
     load_recons_net = False
-    flow_pretrain_fn = args.pretrain_models_dir + 'network-default.pytorch'
+    flow_pretrain_fn = args.pretrain_models_dir / 'network-default.pytorch'
     recons_pretrain_fn = ''
     is_mask_filter = True
     return CDVD_TSP(in_channels        = args.n_colors,

@@ -1,8 +1,8 @@
 # CDVD-TSP
 
 [![LICENSE](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/csbhr/CDVD-TSP/blob/master/LICENSE)
-[![Python](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/pytorch-1.9.1-%237732a8.svg)](https://pytorch.org/)
+[![Python](https://img.shields.io/badge/Python-3.8-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-1.10-%237732a8.svg)](https://pytorch.org/)
 
 #### [Paper](https://arxiv.org/abs/2004.02501) | [Project Page](https://csbhr.github.io/projects/cdvd-tsp/index.html) | [Discussion](https://github.com/csbhr/CDVD-TSP/issues)
 ### Cascaded Deep Video Deblurring Using Temporal Sharpness Prior[[1](#user-content-citation-1)]
@@ -34,21 +34,36 @@ More detailed analysis and experimental results are included in [[Project Page]]
 - matplotlib: `conda install matplotlib`
 - opencv: `conda install opencv`
   - *Could not find a compatible version for Python 3.9.*
-  - *ToDo: rewrite `inference.py` to no longer require it*
+  - *Need to specify the `conda-forge` channel to install a compatible version *
+  - `conda install -c conda-forge opencv`
 - imageio: `conda install imageio`
 - skimage: `conda install scikit-image`
 - tqdm: `conda install tqdm`
 - [torch-lr-finder](https://github.com/davidtvs/pytorch-lr-finder): `pip install torch-lr-finder`
 - [cupy](https://github.com/cupy/cupy/): `conda install -c anaconda cupy`
-### Example for Python 3.9
+
+### Example for Python 3.8
 ```dos
-conda install -y pytorch=1.91 torchvision torchaudio cudatoolkit=10.2 -c pytorch
+conda install -y pytorch=1.10 torchvision torchaudio cudatoolkit=11.3 -c pytorch
 conda install -y matplotlib
+conda install -y opencv
 conda install -y imageio
 conda install -y scikit-image
 conda install -y tqdm
+pip install cupy-cuda113
 pip install torch-lr-finder
-pip install cupy-cuda102
+```
+
+### Example for Python 3.9
+```dos
+conda install -y pytorch=1.10 torchvision torchaudio cudatoolkit=11.3 -c pytorch
+conda install -y matplotlib
+conda install -y -c conda-forge opencv
+conda install -y imageio
+conda install -y scikit-image
+conda install -y tqdm
+pip install cupy-cuda113
+pip install torch-lr-finder
 ```
 
 ## Get Started
@@ -207,7 +222,7 @@ python inference.py --data_path path/to/data --model_path path/to/pretrained/mod
     * Refer to project [pytorch_memonger](https://github.com/prigoyal/pytorch_memonger/)
     * This frees up more GPU Memory allowing a larger `--batch_size` or `--patch_size`.
     * Takes longer if the `--batch_size` is not changed, but if it is increased it can take less time for the same amount of data.
-      * For a Stage 2 model with a patch size of 256, an 8GB card can only do a batch size of 3 but with checkpointing it can do at least 10.
+      * For a Stage 2 model with a patch size of 256, an 8GB card can only do a batch size of 3 but with checkpointing it can do 13 (however batch size 10 is faster).
     * Using a larger `--patch_size` results in a more stable total loss and less chance there is a sudden gain in loss that does not recover quickly. This should result in fewer epochs before reaching convergence.
     * As a side note: The `optimizer.pt` and `scheduler.pt` files are about half the size as well.
   * Changed loss calculation to be per stage instead of just one loss for a Stage 2 or Stage 3 model per iteration. See wiki

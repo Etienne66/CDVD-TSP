@@ -196,7 +196,7 @@ class Inference:
                                         postprocess_time - start_time))
             sum_psnr = 0.
             sum_ssim = 0.
-            sum_ssim2 = 0.
+            #sum_ssim2 = 0.
             n_img = 0
             for k in total_psnr.keys():
                 if len(total_psnr[k]) != 0:

@@ -58,14 +58,12 @@ class VIDEODATA(data.Dataset):
         images_input = []
 
         for vid_gt_name, vid_input_name in zip(vid_gt_names, vid_input_names):
-            # Use map to perform the str function on each element. The result is a map object.
-            # Use list on map object to change to a list array.
             if self.train:
-                gt_dir_names = list(map(str, sorted(vid_gt_name.iterdir())[:self.args.n_frames_per_video]))
-                input_dir_names = list(map(str, sorted(vid_input_name.iterdir())[:self.args.n_frames_per_video]))
+                gt_dir_names = sorted(vid_gt_name.iterdir())[:self.args.n_frames_per_video]
+                input_dir_names = sorted(vid_input_name.iterdir())[:self.args.n_frames_per_video]
             else:
-                gt_dir_names = list(map(str, sorted(vid_gt_name.iterdir())))
-                input_dir_names = list(map(str, sorted(vid_input_name.iterdir())))
+                gt_dir_names = sorted(vid_gt_name.iterdir())
+                input_dir_names = sorted(vid_input_name.iterdir())
             images_gt.append(gt_dir_names)
             images_input.append(input_dir_names)
             self.n_frames_video.append(len(gt_dir_names))
@@ -95,11 +93,11 @@ class VIDEODATA(data.Dataset):
         else:
             inputs, gts, filenames = self._load_file(idx)
 
-        inputs_patch, gts_patch = self.get_patch_frames(inputs, gts, self.args.size_must_mode)
+        inputs, gts = self.get_patch_frames(inputs, gts, self.args.size_must_mode)
         
-        input_tensors = utils.np2Tensor(*inputs_patch, rgb_range=self.args.rgb_range)
-        gt_tensors = utils.np2Tensor(*gts_patch, rgb_range=self.args.rgb_range)
-        
+        input_tensors = utils.np2Tensor(*inputs, rgb_range=self.args.rgb_range)
+        gt_tensors = utils.np2Tensor(*gts, rgb_range=self.args.rgb_range)
+       
         return torch.stack(input_tensors), torch.stack(gt_tensors), filenames
 
     def __len__(self):
@@ -130,7 +128,7 @@ class VIDEODATA(data.Dataset):
         f_inputs = self.images_input[video_idx][frame_idx:frame_idx + self.n_seq]
         gts = np.asarray([imageio.imread(hr_name) for hr_name in f_gts])
         inputs = np.asarray([imageio.imread(lr_name) for lr_name in f_inputs])
-        filenames = [os.path.split(os.path.dirname(name))[-1] + '.' + os.path.splitext(os.path.basename(name))[0]
+        filenames = [name.parent.parts[-1] + '.' + name.stem
                      for name in f_inputs]
 
         return inputs, gts, filenames
@@ -142,7 +140,7 @@ class VIDEODATA(data.Dataset):
         video_idx, frame_idx = self._find_video_num(idx, n_poss_frames)
         gts = self.data_gt[video_idx][frame_idx:frame_idx + self.n_seq]
         inputs = self.data_input[video_idx][frame_idx:frame_idx + self.n_seq]
-        filenames = [os.path.split(os.path.dirname(name))[-1] + '.' + os.path.splitext(os.path.basename(name))[0]
+        filenames = [name.parent.parts[-1] + '.' + name.stem
                      for name in self.images_gt[video_idx][frame_idx:frame_idx + self.n_seq]]
 
         return inputs, gts, filenames

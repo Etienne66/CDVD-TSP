@@ -70,7 +70,8 @@ class Trainer_CDVD_TSP(Trainer):
             total_loss = sum(loss)
             total_loss.backward()
         
-        return lr_array, loss_array
+        if self.args.plot_running_average:
+            return lr_array, loss_array
     # end_loss_backward
 
     
@@ -123,16 +124,16 @@ class Trainer_CDVD_TSP(Trainer):
             for batch, (input, gt, filenames) in enumerate(tqdm_train):
                 lr = self.scheduler.get_last_lr()[0]
                 self.ckp.report_log(float(lr), type='LR')
-                input_gpu = input.to(self.device)
+                input_gpu = input.to(device=self.device, memory_format=torch.contiguous_format)
                 if self.args.n_sequence == 3:
-                    gt_cat = torch.cat([gt[:, 1, :, :, :]], dim=1).to(self.device)
+                    gt_cat = torch.cat([gt[:, 1, :, :, :]], dim=1).to(device=self.device, memory_format=torch.contiguous_format)
                 elif self.args.n_sequence == 5:
                     gt_cat = torch.cat([gt[:, 1, :, :, :], gt[:, 2, :, :, :], gt[:, 3, :, :, :],
-                                        gt[:, 2, :, :, :]], dim=1).to(self.device)
+                                        gt[:, 2, :, :, :]], dim=1).to(device=self.device, memory_format=torch.contiguous_format)
                 elif self.args.n_sequence == 7:
                     gt_cat = torch.cat([gt[:, 1, :, :, :], gt[:, 2, :, :, :], gt[:, 3, :, :, :], gt[:, 4, :, :, :], gt[:, 5, :, :, :],
                                         gt[:, 2, :, :, :], gt[:, 3, :, :, :], gt[:, 4, :, :, :],
-                                        gt[:, 3, :, :, :]], dim=1).to(self.device)
+                                        gt[:, 3, :, :, :]], dim=1).to(device=self.device, memory_format=torch.contiguous_format)
                 preprocess_time = datetime.now()
                 self.optimizer.zero_grad()
                 with torch.set_grad_enabled(True):
@@ -140,7 +141,10 @@ class Trainer_CDVD_TSP(Trainer):
                     forward_time = datetime.now()
                     loss = self.loss(output_cat, gt_cat)
                     loss_time = datetime.now()
-                    lr_array, loss_array = self.loss_backward(loss, lr, lr_array, loss_array, batch, stages)
+                    if self.args.plot_running_average:
+                        lr_array, loss_array = self.loss_backward(loss, lr, lr_array, loss_array, batch, stages)
+                    else:
+                        self.loss_backward(loss, lr, None, None, batch, stages)
                     backward_time = datetime.now()
                     self.optimizer.step()
                     optimizer_time = datetime.now()
@@ -173,7 +177,7 @@ class Trainer_CDVD_TSP(Trainer):
                 if (self.args.plot_running_average
                     #and batch > 0
                     and (   (batch + 1) % self.args.running_average == 0
-                         or batch + 1 == len(self.loader_train))
+                         or batch == len(self.loader_train))
                     ):
                     with torch.set_grad_enabled(False):
                         self.loss.plot_iteration_loss(
@@ -274,8 +278,8 @@ class Trainer_CDVD_TSP(Trainer):
                     #    torch.cuda.empty_cache()
                     SSIM = []
                     PSNR = []
-                    input_gpu = input.to(self.device)
-                    gt = gt[:, self.args.n_sequence // 2, :, :, :].to(self.device)
+                    input_gpu = input.to(device=self.device, memory_format=torch.contiguous_format)
+                    gt = gt[:, self.args.n_sequence // 2, :, :, :].to(device=self.device, memory_format=torch.contiguous_format)
                     preprocess_time = datetime.now()
                     output_cat = self.model(input_gpu)
                     forward_time = datetime.now()

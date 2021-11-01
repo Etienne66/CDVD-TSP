@@ -8,7 +8,10 @@ import skimage.color as sc
 import random
 import matplotlib.pyplot as plt
 import time
+from pathlib import Path
+import traceback
 
+#import matplotlib
 #matplotlib.use('Agg')
 #from matplotlib import pyplot as plt
 
@@ -22,45 +25,45 @@ class Logger:
         self.epoch = 0
         self.stages = (args.n_sequence // 2)
 
-        if args.load == '.':
-            if args.save == '.':
+        if args.load is None:
+            if args.save is None:
                 args.save = datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S", now_time)
-            self.dir = args.experiment_dir + args.save
+            self.dir = args.experiment_dir / args.save
         else:
-            self.dir = args.experiment_dir + args.load
-            if not os.path.exists(self.dir):
-                args.load = '.'
+            self.dir = args.experiment_dir / args.load
+            if not self.dir.exists():
+                args.load = None
             else:
-                self.ssim_log = torch.load(self.dir + '/ssim_log.pt')
-                self.psnr_log = torch.load(self.dir + '/psnr_log.pt')
-                self.lr_log = torch.load(self.dir + '/lr_log.pt')
+                self.ssim_log = torch.load(self.dir / 'ssim_log.pt')
+                self.psnr_log = torch.load(self.dir / 'psnr_log.pt')
+                self.lr_log = torch.load(self.dir / 'lr_log.pt')
                 self.epoch = len(self.psnr_log)
                 print('Continue from epoch {}...'.format(self.epoch))
         
         args.save_dir = self.dir
 
-        if not os.path.exists(self.dir):
-            os.makedirs(self.dir)
-            if not os.path.exists(self.dir + '/model'):
-                os.makedirs(self.dir + '/model')
-        if not os.path.exists(self.dir + '/result/' + self.args.data_test):
-            print("Creating dir for saving images...", self.dir + '/result/' + self.args.data_test)
-            os.makedirs(self.dir + '/result/' + self.args.data_test)
+        if not self.dir.exists():
+            self.dir.mkdir(parents=True)
+            if not Path(self.dir / 'model').exists():
+                Path(self.dir / 'model').mkdir(parents=True)
+        if not Path(self.dir / 'result' / self.args.data_test).exists():
+            print("Creating dir for saving images...", str(Path((self.dir / 'result' / self.args.data_test))))
+            Path(self.dir / 'result' / self.args.data_test).mkdir(parents=True)
 
         print('Save Path : {}'.format(self.dir))
 
     # Do not log anything if we are just trying to find the learning rate to use
         if not args.lr_finder:
             if self.epoch == 0:
-                if os.path.exists(self.dir + '/log.txt'):
-                    val = input("Do you want to overwrite: {}/log.txt (Y/N)".format(self.dir)) or 'N'
+                if Path(self.dir / 'log.txt').exists():
+                    val = input("Do you want to overwrite: {} (Y/N)".format(self.dir / 'log.txt')) or 'N'
                     if val.upper() != 'Y':
                         exit()
                 open_type = 'w'
             else:
-                open_type = 'a' if os.path.exists(self.dir + '/log.txt') else 'w'
-            self.log_file = open(self.dir + '/log.txt', open_type, buffering=1)
-            self.config_file = open(self.dir + '/config.txt', open_type, buffering=1)
+                open_type = 'a' if Path(self.dir / 'log.txt').exists() else 'w'
+            self.log_file = Path(self.dir / 'log.txt').open(mode=open_type, buffering=1)
+            self.config_file = Path(self.dir / 'config.txt').open(mode=open_type, buffering=1)
             self.config_file.write('From epoch {}...'.format(self.epoch) + '\n\n')
             if self.epoch == 0:
                 for arg in sorted(vars(args)):
@@ -78,11 +81,11 @@ class Logger:
 
     def save(self, trainer, epoch, is_best):
         trainer.model.save(self.dir, epoch, is_best)
-        torch.save(self.ssim_log, os.path.join(self.dir, 'ssim_log.pt'))
-        torch.save(self.psnr_log, os.path.join(self.dir, 'psnr_log.pt'))
-        torch.save(self.lr_log, os.path.join(self.dir, 'lr_log.pt'))
-        torch.save(trainer.optimizer.state_dict(), os.path.join(self.dir, 'optimizer.pt'))
-        torch.save(trainer.scheduler.state_dict(), os.path.join(self.dir, 'scheduler.pt'))
+        torch.save(self.ssim_log, Path(self.dir / 'ssim_log.pt'))
+        torch.save(self.psnr_log, Path(self.dir / 'psnr_log.pt'))
+        torch.save(self.lr_log, Path(self.dir / 'lr_log.pt'))
+        torch.save(trainer.optimizer.state_dict(), Path(self.dir / 'optimizer.pt'))
+        torch.save(trainer.scheduler.state_dict(), Path(self.dir / 'scheduler.pt'))
         rng_state = torch.get_rng_state()
         random_state = random.getstate()
         numpy_random_state = np.random.get_state()
@@ -94,7 +97,7 @@ class Logger:
                     'random_state': random_state,
                     'numpy_random_state': numpy_random_state
                    },
-                   os.path.join(self.dir, 'checkpoint.tar'))
+                   Path(self.dir / 'checkpoint.tar'))
         trainer.loss.save(self.dir)
         if epoch > 1:
             trainer.loss.plot_loss(self.dir, epoch)
@@ -105,9 +108,9 @@ class Logger:
     def save_images(self, filename, save_list, epoch):
         if self.args.task == 'VideoDeblur':
             f = filename.split('.')
-            dirname = '{}/result/{}/{}'.format(self.dir, self.args.data_test, f[0])
-            if not os.path.exists(dirname):
-                os.mkdir(dirname)
+            dirname = Path(self.dir / 'result' / self.args.data_test / f[0])
+            if not dirname.exists():
+                dirname.mkdir
             filename = '{}/{}'.format(dirname, f[1])
             #postfix = ['gt', 'blur', 'deblur', 'deblur1']
             postfix = ['gt', 'blur', 'deblur']
@@ -163,9 +166,13 @@ class Logger:
         plt.grid(True)
         fig.tight_layout()
         try:
-            plt.savefig(os.path.join(self.dir, 'ssim.png'), dpi=100)
+            plt.savefig(self.dir / 'ssim.png', dpi=100)
         except:
-            plt.savefig(os.path.join(self.dir, 'ssim-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))), dpi=100)
+            try:
+                plt.savefig(self.dir / 'ssim-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
+            except:
+                traceback.print_exc()
+                exit()
         plt.close(fig)
         plt.close()
 
@@ -183,9 +190,13 @@ class Logger:
         plt.grid(True)
         fig.tight_layout()
         try:
-            plt.savefig(os.path.join(self.dir, 'psnr.png'), dpi=100)
+            plt.savefig(self.dir / 'psnr.png', dpi=100)
         except:
-            plt.savefig(os.path.join(self.dir, 'psnr-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))), dpi=100)
+            try:
+                plt.savefig(self.dir / 'psnr-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
+            except:
+                traceback.print_exc()
+                exit()
         plt.close(fig)
         plt.close()
 
@@ -200,9 +211,13 @@ class Logger:
         plt.grid(True)
         fig.tight_layout()
         try:
-            plt.savefig(os.path.join(self.dir, 'lr.png'), dpi=100)
+            plt.savefig(self.dir / 'lr.png', dpi=100)
         except:
-            plt.savefig(os.path.join(self.dir, 'lr-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))), dpi=100)
+            try:
+                plt.savefig(self.dir / 'lr-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
+            except:
+                traceback.print_exc()
+                exit()
         plt.close(fig)
         plt.close()
 

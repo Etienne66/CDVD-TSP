@@ -1,5 +1,6 @@
 import argparse
 from option import template
+from pathlib import Path
 
 parser = argparse.ArgumentParser(description='Video_Deblur')
 
@@ -46,9 +47,9 @@ parser.add_argument('--n_sequence', type=int, default=5,
                     help='Set number of frames to evaluate for 1 output frame')
 
 # Model specifications
-parser.add_argument('--model', default='.',
+parser.add_argument('--model', default=None,
                     help='model name')
-parser.add_argument('--pre_train', type=str, default='.',
+parser.add_argument('--pre_train', type=Path, default=None,
                     help='pre-trained model directory')
 
 # Training specifications
@@ -106,15 +107,15 @@ parser.add_argument('--mid_loss_weight', type=float, default=1.,
                     help='the weight of mid loss in trainer')
 
 # Log specifications
-parser.add_argument('--experiment_dir', type=str, default='../experiment/',
+parser.add_argument('--experiment_dir', type=Path, default='../experiment/',
                     help='file name to save')
-parser.add_argument('--pretrain_models_dir', type=str, default='../pretrain_models/',
+parser.add_argument('--pretrain_models_dir', type=Path, default='../pretrain_models/',
                     help='file name to save')
-parser.add_argument('--save', type=str, default='CDVD_TSP_Video_Deblur',
+parser.add_argument('--save', type=Path, default='CDVD_TSP_Video_Deblur',
                     help='experiment name to save')
 parser.add_argument('--save_middle_models', action='store_true',
                     help='save all intermediate models')
-parser.add_argument('--load', type=str, default='.',
+parser.add_argument('--load', type=Path, default=None,
                     help='experiment name to load')
 parser.add_argument('--resume', action='store_true',
                     help='resume from the latest complete epoch')

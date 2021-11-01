@@ -6,11 +6,14 @@ import torch.nn as nn
 from loss.hard_example_mining import HEM, HEM_MSSIM_L1
 from datetime import datetime
 import time
+from pathlib import Path
 
+#import matplotlib
 #matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from scipy.ndimage.filters import uniform_filter1d
 from loss.ssim import MS_SSIM
+import traceback
 
 class Loss(nn.modules.loss._Loss):
     def __init__(self, args, ckp):
@@ -87,14 +90,14 @@ class Loss(nn.modules.loss._Loss):
 
         self.log = torch.Tensor()
 
-        self.loss_module.to(device)
+        self.loss_module.to(device=device, memory_format=torch.contiguous_format)
 
         if not args.cpu and args.n_GPUs > 1:
             self.loss_module = nn.DataParallel(
                 self.loss_module, range(args.n_GPUs)
             )
 
-        if args.load != '.':
+        if args.load is not None:
             self.load(ckp.dir, cpu=args.cpu)
 
     def forward(self, sr, hr):
@@ -197,9 +200,13 @@ class Loss(nn.modules.loss._Loss):
             plt.grid(True)
             fig.tight_layout()
             try:
-                plt.savefig('{}/loss.png'.format(apath), dpi=100)
+                plt.savefig(apath / 'loss.png', dpi=100)
             except:
-                plt.savefig('{}/loss-{}.png'.format(apath, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
+                try:
+                    plt.savefig(apath / 'loss-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
+                except:
+                    traceback.print_exc()
+                    exit()
             plt.close(fig)
             plt.close()
             
@@ -216,9 +223,13 @@ class Loss(nn.modules.loss._Loss):
                 plt.grid(True)
                 fig.tight_layout()
                 try:
-                    plt.savefig('{}/MS-SSIM.png'.format(apath), dpi=100)
+                    plt.savefig(apath / 'MS-SSIM.png', dpi=100)
                 except:
-                    plt.savefig('{}/MS-SSIM-{}.png'.format(apath, time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
+                    try:
+                        plt.savefig(apath / 'MS-SSIM-{}.png'.format(time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())), dpi=100)
+                    except:
+                        traceback.print_exc()
+                        exit()
                 plt.close(fig)
                 plt.close()
     
@@ -268,14 +279,16 @@ class Loss(nn.modules.loss._Loss):
         ax1.grid(True)
         fig.tight_layout()
         try:
-            plt.savefig('{}/average_loss_epoch_{:03d}.png'.format(apath,
-                                                                  epoch),
+            plt.savefig(apath / 'average_loss_epoch_{:03d}.png'.format(epoch),
                         dpi=100)
         except:
-            plt.savefig('{}/average_loss_epoch_{:03d}-{}.png'.format(apath,
-                                                                  epoch,
-                                                                  time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())),
-                        dpi=100)
+            try:
+                plt.savefig(apath / 'average_loss_epoch_{:03d}-{}.png'.format(epoch,
+                                                                              time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())),
+                            dpi=100)
+            except:
+                traceback.print_exc()
+                exit()
         plt.close(fig)
         plt.close()
 
@@ -288,8 +301,8 @@ class Loss(nn.modules.loss._Loss):
             return self.loss_module.module
 
     def save(self, apath):
-        torch.save(self.state_dict(), os.path.join(apath, 'loss_state.pt'))
-        torch.save(self.log, os.path.join(apath, 'loss_log.pt'))
+        torch.save(self.state_dict(), Path(apath / 'loss_state.pt'))
+        torch.save(self.log, Path(apath / 'loss_log.pt'))
 
     def load(self, apath, cpu=False):
         if cpu:
@@ -298,10 +311,10 @@ class Loss(nn.modules.loss._Loss):
             kwargs = {}
 
         self.load_state_dict(torch.load(
-            os.path.join(apath, 'loss_state.pt'),
+            Path(apath / 'loss_state.pt'),
             **kwargs
         ))
-        self.log = torch.load(os.path.join(apath, 'loss_log.pt'))
+        self.log = torch.load(Path(apath / 'loss_log.pt'))
         for l in self.loss_module:
             if hasattr(l, 'scheduler'):
                 for _ in range(len(self.log)): l.scheduler.step()

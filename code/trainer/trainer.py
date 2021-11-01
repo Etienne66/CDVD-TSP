@@ -8,6 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import random
 import numpy as np
+from pathlib import Path
 
 class CustomTrainIter(TrainDataLoaderIter):
     def inputs_labels_from_batch(self, input):
@@ -74,17 +75,17 @@ class Trainer:
                 lr_finder.plot(ax=ax)
             plt.grid(True)
             fig.tight_layout()
-            fig.savefig('{}/LRvsLoss.png'.format(args.experiment_dir + args.save), dpi=100)
+            fig.savefig(args.experiment_dir / args.save / 'LRvsLoss.png', dpi=100)
             plt.close()
             #lr_finder.reset()
 
         self.scheduler = self.make_scheduler()
         self.ckp = ckp
 
-        if args.load != '.':
-            self.optimizer.load_state_dict(torch.load(os.path.join(ckp.dir, 'optimizer.pt')))
-            self.scheduler.load_state_dict(torch.load(os.path.join(ckp.dir, 'scheduler.pt')))
-            checkpoint = torch.load(os.path.join(ckp.dir, 'checkpoint.tar'))
+        if args.load is not None:
+            self.optimizer.load_state_dict(torch.load(ckp.dir / 'optimizer.pt'))
+            self.scheduler.load_state_dict(torch.load(ckp.dir / 'scheduler.pt'))
+            checkpoint = torch.load(ckp.dir / 'checkpoint.tar')
             self.args.total_train_time = checkpoint['total_train_time']
             self.args.total_test_time  = checkpoint['total_test_time']
             self.args.epochs_completed = checkpoint['epochs_completed']

@@ -13,7 +13,6 @@ def make_model(args):
 
 
 class RECONS_VIDEO(nn.Module):
-
     def __init__(self,
                  in_channels    = 3,
                  n_sequence     = 3,
@@ -95,9 +94,9 @@ class RECONS_VIDEO(nn.Module):
         self.outBlock = nn.Sequential(*OutBlock)
 
     def custom(self, module):
-        """ This is used for Checkpointing
-            See the following website for more information
-            https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
+        """This is used for Checkpointing
+        See the following website for more information
+        https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
         """
         def custom_forward(*inputs):
             inputs = module(inputs[0])

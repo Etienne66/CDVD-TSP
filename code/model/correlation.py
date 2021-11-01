@@ -5,7 +5,7 @@ import cupy
 import re
 
 class Stream:
-    r""" begin added by csbhr    
+    """ begin added by csbhr    
     """
     ptr = torch.cuda.current_stream().cuda_stream
 # end
@@ -240,7 +240,7 @@ kernel_Correlation_updateGradSecond = '''
 
 
 def cupy_kernel(strFunction, objectVariables):
-    r""" Duplicate function from `correlation.py` of
+    """ Duplicate function from `correlation.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -286,7 +286,7 @@ def cupy_kernel(strFunction, objectVariables):
 # cupy v9.0.0a1/v8.0.0 Rename cupy.util submodule to cupy._util (#3779)/(#3938)
 @cupy.memoize(for_each_device=True)
 def cupy_launch(strFunction, strKernel):
-    r""" Duplicate function from `correlation.py` of
+    """ Duplicate function from `correlation.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -294,7 +294,7 @@ def cupy_launch(strFunction, strKernel):
 # end
 
 class _FunctionCorrelation(torch.autograd.Function):
-    r""" Duplicate class from `correlation.py` of
+    """ Duplicate class from `correlation.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -395,7 +395,7 @@ class _FunctionCorrelation(torch.autograd.Function):
                                )(grid=tuple([int((n + 512 - 1) / 512), 1, 1]),
                                  block=tuple([512, 1, 1]),
                                  args=[cupy.int32(n),
-                                       cupy.int32(intSample),
+                                       intSample,
                                        rbot0.data_ptr(),
                                        rbot1.data_ptr(),
                                        gradOutput.data_ptr(),
@@ -420,7 +420,7 @@ class _FunctionCorrelation(torch.autograd.Function):
                                )(grid=tuple([int((n + 512 - 1) / 512), 1, 1]),
                                  block=tuple([512, 1, 1]),
                                  args=[cupy.int32(n),
-                                       cupy.int32(intSample),
+                                       intSample,
                                        rbot0.data_ptr(),
                                        rbot1.data_ptr(),
                                        gradOutput.data_ptr(),
@@ -441,7 +441,7 @@ class _FunctionCorrelation(torch.autograd.Function):
 # end_FunctionCorrelation
 
 def FunctionCorrelation(tensorFirst, tensorSecond):
-    r""" Duplicate function from `correlation.py` of
+    """ Duplicate function from `correlation.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -449,7 +449,7 @@ def FunctionCorrelation(tensorFirst, tensorSecond):
 # end_FunctionCorrelation
 
 class ModuleCorrelation(torch.nn.Module):
-    r""" Duplicate class from `correlation.py` of
+    """ Duplicate class from `correlation.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """

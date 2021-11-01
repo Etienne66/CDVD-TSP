@@ -53,21 +53,21 @@ class Model(nn.Module):
         target = self.get_model()
         torch.save(
             target.state_dict(),
-            os.path.join(apath, 'model', 'model_latest.pt')
+            Path(apath / 'model' / 'model_latest.pt')
         )
         if is_best:
             torch.save(
                 target.state_dict(),
-                os.path.join(apath, 'model', 'model_best.pt')
+                Path(apath / 'model' / 'model_best.pt')
             )
         if self.save_middle_models:
             if epoch % 1 == 0:
                 torch.save(
                     target.state_dict(),
-                    os.path.join(apath, 'model', 'model_{}.pt'.format(epoch))
+                    Path(apath / 'model' / 'model_{}.pt'.format(epoch))
                 )
 
-    def load(self, apath, pre_train='.', resume=False, cpu=False):  #
+    def load(self, apath, pre_train=None, resume=False, cpu=False):  #
         if cpu:
             kwargs = {'map_location': lambda storage, loc: storage}
         else:
@@ -75,18 +75,19 @@ class Model(nn.Module):
 
     # A resume takes precedence over test_only and test_only takes precedence over pre_train
         if resume:
-            print('Loading model from {}'.format(os.path.join(apath, 'model', 'model_latest.pt')))
+            print('Loading model from {}'.format(str(Path(apath / 'model' / 'model_latest.pt'))))
             self.get_model().load_state_dict(
-                torch.load(os.path.join(apath, 'model', 'model_latest.pt'), **kwargs),
+                torch.load(Path(apath / 'model' / 'model_latest.pt'), **kwargs),
                 strict=False
             )
             self.args.load = self.args.save
         elif self.args.test_only:
+            print('Loading model from {}'.format(str(Path(apath / 'model' / 'model_best.pt'))))
             self.get_model().load_state_dict(
-                torch.load(os.path.join(apath, 'model', 'model_best.pt'), **kwargs),
+                torch.load(Path(apath / 'model' / 'model_best.pt'), **kwargs),
                 strict=False
             )
-        elif pre_train != '.':
+        elif pre_train is not None:
             pre_train = self.pretrain_models_dir / pre_train
             print('Loading model from {}'.format(pre_train))
             self.get_model().load_state_dict(

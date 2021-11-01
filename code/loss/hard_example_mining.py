@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from loss.ssim import MS_SSIM_LOSS, MS_SSIM
+from loss.ssim import MS_SSIM
 
 class HEM(nn.Module):
     def __init__(self, hard_thre_p=0.5, device='cuda', random_thre_p=0.1):
@@ -57,7 +57,6 @@ class HEM_MSSIM_L1(nn.Module):
         self.L1_loss = nn.L1Loss()
         self.rbg_range = rbg_range
         self.channel = channel
-        self.MS_SSIM_LOSS = MS_SSIM_LOSS(data_range=rbg_range, channel=channel)
         self.MS_SSIM = MS_SSIM(data_range=rbg_range, channel=channel)
 
     def hard_mining_mask(self, x, y):

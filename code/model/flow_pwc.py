@@ -20,7 +20,7 @@ def make_model(args):
 
 
 class Flow_PWC(nn.Module):
-    r""" Derivative of `run.py` from
+    """Derivative of `run.py` from
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -68,42 +68,36 @@ class Flow_PWC(nn.Module):
         return tensorFlow
 
     def warp(self, x, flo):
-        """ Not part of `run.py` in pytorch-pwc
+        """Not part of `run.py` in pytorch-pwc
         warp an image/tensor (im2) back to im1, according to the optical flow
-            x: [B, C, H, W] (im2)
-            flo: [B, 2, H, W] flow
+            x: [N, C, H, W] (im2)
+            flo: [N, 2, H, W] flow
+            output: [N, C, H, W] (im1)
         """
-        B, C, H, W = x.size()
+        N, C, H, W = x.size()
         # mesh grid
-        #xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
-        #yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
         xx = torch.arange(0, W, device=self.device, dtype=torch.float32, requires_grad=True).view(1, -1).repeat(H, 1)
         yy = torch.arange(0, H, device=self.device, dtype=torch.float32, requires_grad=True).view(-1, 1).repeat(1, W)
-        xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
-        yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
-        #grid = torch.cat((xx, yy), 1).float()
-        #grid = grid.to(self.device)
-        #vgrid = Variable(grid) + flo
-        grid = torch.cat((xx, yy), 1)
-        vgrid = grid.add_(flo)
+        xx = xx.view(1, 1, H, W).repeat(N, 1, 1, 1)
+        yy = yy.view(1, 1, H, W).repeat(N, 1, 1, 1)
+        grid = torch.cat((xx, yy), 1).add_(flo)
 
         # scale grid to [-1,1]
-        vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
-        vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
+        grid[:, 0, :, :] = 2.0 * grid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
+        grid[:, 1, :, :] = 2.0 * grid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
 
-        vgrid = vgrid.permute(0, 2, 3, 1)
+        grid = grid.permute(0, 2, 3, 1) # N2HW -> NHW2
         # Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0. Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
         # Code was developed for 0.4.1
         output = nn.functional.grid_sample(x,
-                                           vgrid,
+                                           grid,
                                            padding_mode  = 'border',
                                            align_corners = False)
-        #mask = torch.autograd.Variable(torch.ones(x.size())).cuda()
         mask = torch.ones_like(x,
                                device        = self.device,
                                requires_grad = True)
         mask = nn.functional.grid_sample(mask,
-                                         vgrid,
+                                         grid,
                                          align_corners = False)
 
         mask[mask < 0.999] = 0
@@ -111,20 +105,19 @@ class Flow_PWC(nn.Module):
 
         output = output * mask
 
-
         return output, mask
 
+
     def forward(self, frame_1, frame_2):
-        r""" Not part of `run.py` in pytorch-pwc
-            - Find the flow between Frame 1 and Frame 2
-            - Warp Frame 2 to the same position as Frame 1
+        """Not part of `run.py` in pytorch-pwc
+        - Find the flow between Frame 1 and Frame 2
+        - Warp Frame 2 to the same position as Frame 1
         """
         # flow
         flow = self.estimate_flow(frame_1, frame_2)
 
         # warp
         frame_2_warp, mask = self.warp(frame_2, flow)
-
 
         return frame_2_warp, flow, mask
     # end
@@ -135,7 +128,7 @@ Backwarp_tensorGrid = {}
 Backwarp_tensorPartial = {}
 
 def Backwarp(tensorInput, tensorFlow, device='cuda'):
-    r""" Duplicate function from `run.py` from
+    """Duplicate function from `run.py` from
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -192,7 +185,7 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
 ##########################################################
 
 class Network(torch.nn.Module):
-    r""" Duplicate class from `run.py` of
+    """ Duplicate class from `run.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -204,12 +197,11 @@ class Network(torch.nn.Module):
 
 
         class Extractor(torch.nn.Module):
-            r""" The feature pyramid extractor network. The first image (t = 1)
-                 and the second image (t =2) are encoded using the same Siamese net-
-                 work. Each convolution is followed by a leaky ReLU unit. The convolu-
-                 tional layer and the ×2 downsampling layer at each level is implemented
-                 using a single convolutional layer with a stride of 2. c denotes extracted features of image t at level l
-              """
+            """ The feature pyramid extractor network. The first image (t = 1)
+            and the second image (t =2) are encoded using the same Siamese network. Each convolution is followed by a leaky ReLU
+            unit. The convolutional layer and the ×2 downsampling layer at each level is implemented using a single convolutional
+            layer with a stride of 2. c denotes extracted features of image t at level l
+            """
             def __init__(self):
                 super(Extractor, self).__init__()
 
@@ -281,9 +273,7 @@ class Network(torch.nn.Module):
         # end
 
         class Decoder(torch.nn.Module):
-            r""" Each convolutional layer is followed by a leaky ReLU unit except the last
-                 one that outputs the optical flow.
-            """
+            """Each convolutional layer is followed by a leaky ReLU unit except the last one that outputs the optical flow."""
             def __init__(self, intLevel):
                 super(Decoder, self).__init__()
 
@@ -418,16 +408,19 @@ class Network(torch.nn.Module):
         # end
 
         class Refiner(torch.nn.Module):
-            r""" Each convolutional layer is followed by a leaky ReLU unit except the last one
-                 that outputs the optical flow. The last number in each convolutional layer
-                 denotes the dilation constant.
+            """Each convolutional layer is followed by a leaky ReLU unit except the last one that outputs the optical flow. The
+            last number in each convolutional layer denotes the dilation constant.
             """
             def __init__(self):
                 super(Refiner, self).__init__()
 
                 self.moduleMain = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=81 + 32 + 2 + 2 + 128 + 128 + 96 + 64 + 32, out_channels=128,
-                                    kernel_size=3, stride=1, padding=1, dilation=1),
+                    torch.nn.Conv2d(in_channels  = 81 + 32 + 2 + 2 + 128 + 128 + 96 + 64 + 32,
+                                    out_channels = 128,
+                                    kernel_size  = 3,
+                                    stride       = 1,
+                                    padding      = 1,
+                                    dilation     = 1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
                     torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=2, dilation=2),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
@@ -465,9 +458,9 @@ class Network(torch.nn.Module):
     # end
 
     def custom(self, module):
-        """ This is used for Checkpointing
-            See the following website for more information
-            https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
+        """This is used for Checkpointing
+        See the following website for more information
+        https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
         """
         def custom_forward(*inputs):
             if type(module) == type(self.moduleExtractor):

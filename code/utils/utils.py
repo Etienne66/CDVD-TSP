@@ -48,15 +48,21 @@ def get_patch_frames(*args, patch_size=17, scale=1):
 
 def np2Tensor(*args, rgb_range=1.):
     def _np2Tensor(img):
+        """Convert Numpy to Tensor but is still on CPU but ready for GPU
+
+        Tried doing the np.transpose(torch.permute) and np.ascontiguousarray(torch.contiguous) as a tensor but it caused
+        issues with strides and random errors like below. Plus there is no speed up since this is being done in the CPU.
+        I think Pan converted the array to float64 to give it more room in memory for the transpose since it is converted to
+        float32 before it is divided by 255.
+            CUDA_ERROR_ILLEGAL_ADDRESS: an illegal memory access was encountered
+        """
         #img = img.astype('float64')
         #np_transpose = np.ascontiguousarray(img.transpose((2, 0, 1)))  # NHWC -> NCHW
-        #tensor = torch.from_numpy(np_transpose).float()  # numpy -> tensor
-        
-        # numpy array has to be contiguous before it is converted to a tensor or a strides error occurs
-        # ValueError: At least one stride in the given numpy array is negative, and tensors with negative strides are not
-        #             currently supported. (You can probably work around this by making a copy of your array with array.copy().)
-        tensor = torch.from_numpy(np.ascontiguousarray(img)).permute((2, 0, 1)).float()  # numpy -> tensor
-        tensor.mul_(rgb_range / 255)  # (0,255) -> (0,1)
+        #tensor = torch.from_numpy(np_transpose).float()                # numpy -> tensor
+        #tensor.mul_(rgb_range / 255.0)                                 # (0,255) -> (0,1)
+        img = np.ascontiguousarray(img.transpose((2, 0, 1)), dtype=np.float32)  # NHWC -> NCHW
+        img *= rgb_range / 255.0                                                # (0,255) -> (0,1)
+        tensor = torch.from_numpy(img)                                          # numpy -> tensor
 
         return tensor
 
@@ -64,7 +70,7 @@ def np2Tensor(*args, rgb_range=1.):
 
 def Tensor2numpy(*args, rgb_range=1.):
     def _Tensor2np(img):
-        img = img.mul(255 / rgb_range).clamp(0, 255).round().permute((1, 2, 0)) # NCHW -> NHWC
+        img = img.mul(255.0 / rgb_range).clamp(0, 255).round().permute((1, 2, 0)) # NCHW -> NHWC
         img = img.cpu().numpy().astype(np.uint8)
         return img
     return [_Tensor2np(a) for a in args]
@@ -106,6 +112,7 @@ def data_augment_frames(*args, hflip=True, rot=True):
         return img
 
     return [_augment(a) for a in args]
+
 
 def postprocess(*images, rgb_range=1., ycbcr_flag, device):
     def _postprocess(img, rgb_coefficient, ycbcr_flag, device):
