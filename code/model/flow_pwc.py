@@ -32,7 +32,7 @@ class Flow_PWC(nn.Module):
         super(Flow_PWC, self).__init__()
         self.device = device
         self.use_checkpoint = use_checkpoint
-        self.moduleNetwork = Network(use_checkpoint = self.use_checkpoint)
+        self.moduleNetwork = Network(device=self.device, use_checkpoint = self.use_checkpoint)
         print("Creating Flow PWC")
 
         if load_pretrain:
@@ -40,6 +40,9 @@ class Flow_PWC(nn.Module):
             print('Loading Flow PWC pretrain model from {}'.format(pretrain_fn))
 
     def estimate_flow(self, tensorFirst, tensorSecond):
+        #print()
+        #print("tensorFirst: ", tensorFirst)
+        #print("tensorFirst.size(): ", tensorFirst.size())
         b, c, intHeight, intWidth = tensorFirst.size()
 
         intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
@@ -60,34 +63,33 @@ class Flow_PWC(nn.Module):
                                                                                         tensorPreprocessedSecond),
                                                      size          = (intHeight, intWidth),
                                                      mode          = 'bilinear',
-                                                     align_corners = False
-                                                    ) * 20.0
+                                                     align_corners = False)
 
-        tensorFlow[:, 0, :, :] *= float(intWidth) / float(intPreprocessedWidth)
-        tensorFlow[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
+        tensorFlow[:, 0, :, :] *= 20.0 * float(intWidth) / float(intPreprocessedWidth)
+        tensorFlow[:, 1, :, :] *= 20.0 * float(intHeight) / float(intPreprocessedHeight)
 
         return tensorFlow
 
     def warp(self, x, flo):
         """Not part of `run.py` in pytorch-pwc
         warp an image/tensor (im2) back to im1, according to the optical flow
-            x: [N, C, H, W] (im2)
-            flo: [N, 2, H, W] flow
-            output: [N, C, H, W] (im1)
+            x: [B, C, H, W] (im2)
+            flo: [B, 2, H, W] flow
+            output: [B, C, H, W] (im1)
         """
-        N, C, H, W = x.size()
+        B, C, H, W = x.size()
         # mesh grid
         xx = torch.arange(0, W, device=self.device, dtype=torch.float32, requires_grad=True).view(1, -1).repeat(H, 1)
         yy = torch.arange(0, H, device=self.device, dtype=torch.float32, requires_grad=True).view(-1, 1).repeat(1, W)
-        xx = xx.view(1, 1, H, W).repeat(N, 1, 1, 1)
-        yy = yy.view(1, 1, H, W).repeat(N, 1, 1, 1)
+        xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
+        yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
         grid = torch.cat((xx, yy), 1).add_(flo)
 
         # scale grid to [-1,1]
         grid[:, 0, :, :] = 2.0 * grid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
         grid[:, 1, :, :] = 2.0 * grid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
 
-        grid = grid.permute(0, 2, 3, 1) # N2HW -> NHW2
+        grid = grid.permute(0, 2, 3, 1) # B2HW -> BHW2
         # Default grid_sample and affine_grid behavior has changed to align_corners=False since 1.3.0. Please specify align_corners=True if the old behavior is desired. See the documentation of grid_sample for details.
         # Code was developed for 0.4.1
         output = nn.functional.grid_sample(x,
@@ -129,7 +131,8 @@ Backwarp_tensorGrid = {}
 Backwarp_tensorPartial = {}
 
 def Backwarp(tensorInput, tensorFlow, device='cuda'):
-    """Duplicate function from `run.py` from
+    """Warping layer
+    Duplicate function from `run.py` from
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
@@ -185,6 +188,270 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
 
 ##########################################################
 
+
+class _Extractor(torch.nn.Module):
+    """The feature pyramid extractor network. The first image (t = 1) and the second image (t =2) are encoded using the same
+    Siamese network. Each convolution is followed by a leaky ReLU unit. The convolutional layer and the ×2 downsampling layer at
+    each level is implemented using a single convolutional layer with a stride of 2. c denotes extracted features of image t at
+    level l
+    """
+    def __init__(self):
+        super(_Extractor, self).__init__()
+        self.original_model = False
+        if self.original_model:
+            #This matches the original code that seems to have a typo
+            moduleSixChannels = 196
+        else:
+            #This matches the original paper
+            moduleSixChannels = 192
+
+        self.moduleOne = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleTwo = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=2, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleThr = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=2, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleFou = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=64, out_channels=96, kernel_size=3, stride=2, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=96, out_channels=96, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=96, out_channels=96, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleFiv = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=96, out_channels=128, kernel_size=3, stride=2, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleSix = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=128, out_channels=moduleSixChannels, kernel_size=3, stride=2, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=moduleSixChannels, out_channels=moduleSixChannels, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=moduleSixChannels, out_channels=moduleSixChannels, kernel_size=3, stride=1, padding=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+    # end
+
+    def forward(self, tensorInput):
+        tensorOne = self.moduleOne(tensorInput)
+        tensorTwo = self.moduleTwo(tensorOne)
+        tensorThr = self.moduleThr(tensorTwo)
+        tensorFou = self.moduleFou(tensorThr)
+        tensorFiv = self.moduleFiv(tensorFou)
+        tensorSix = self.moduleSix(tensorFiv)
+
+        return [tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
+    # end
+# end
+
+class _Decoder(torch.nn.Module):
+    """The optical flow estimator network. Each convolutional layer is followed by a leaky ReLU unit except the last one that
+    outputs the optical flow.
+    """
+    def __init__(self,
+                 intLevel,
+                 device         = 'cuda',):
+        super(_Decoder, self).__init__()
+        self.device=device
+
+        intPrevious = [None,
+                       None,
+                       81 + 32 + 2 + 2,
+                       81 + 64 + 2 + 2,
+                       81 + 96 + 2 + 2,
+                       81 + 128 + 2 + 2,
+                       81,
+                       None][intLevel + 1]
+        intCurrent = [None,
+                      None,
+                      81 + 32 + 2 + 2,
+                      81 + 64 + 2 + 2,
+                      81 + 96 + 2 + 2,
+                      81 + 128 + 2 + 2,
+                      81,
+                      None][intLevel + 0]
+
+        if intLevel < 6:
+            self.moduleUpflow = torch.nn.ConvTranspose2d(in_channels  = 2,
+                                                         out_channels = 2,
+                                                         kernel_size  = 4,
+                                                         stride       = 2,
+                                                         padding      = 1)
+            self.moduleUpfeat = torch.nn.ConvTranspose2d(in_channels  = intPrevious + 128 + 128 + 96 + 64 + 32,
+                                                         out_channels = 2,
+                                                         kernel_size  = 4,
+                                                         stride       = 2,
+                                                         padding      = 1)
+            # Start with inLevel 6(None), 5(20/32), 4(20/16), 3(20/8) and finally 2(20/4).
+            # 6 doesn't have an objectPrevious so doesn't need a value. 2 is the last.
+            self.dblBackwarp = [None, None, None, 5.0, 2.5, 1.25, 0.625, None][intLevel + 1]
+
+        self.moduleOne = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels  = intCurrent,
+                            out_channels = 128,
+                            kernel_size  = 3,
+                            stride       = 1,
+                            padding      = 1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleTwo = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels  = intCurrent + 128,
+                            out_channels = 128,
+                            kernel_size  = 3,
+                            stride       = 1,
+                            padding      = 1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleThr = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128,
+                            out_channels = 96,
+                            kernel_size  = 3,
+                            stride       = 1,
+                            padding      = 1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleFou = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96,
+                            out_channels = 64,
+                            kernel_size  = 3,
+                            stride       = 1,
+                            padding      = 1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleFiv = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96 + 64,
+                            out_channels = 32,
+                            kernel_size  = 3,
+                            stride       = 1,
+                            padding      = 1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+        )
+
+        self.moduleSix = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96 + 64 + 32,
+                            out_channels = 2,
+                            kernel_size  = 3,
+                            stride       = 1,
+                            padding      = 1)
+        )
+    # end
+
+    def forward(self, tensorFirst, tensorSecond, objectPrevious):
+        tensorFlow = None
+        tensorFeat = None
+
+        if objectPrevious is None:
+            tensorFlow = None
+            tensorFeat = None
+
+            #Cost volume layer. Output is always 81 channels
+            tensorVolume = torch.nn.functional.leaky_relu(
+                input          = correlation.FunctionCorrelation(tensorFirst  = tensorFirst,
+                                                                 tensorSecond = tensorSecond),
+                negative_slope = 0.1,
+                inplace        = False)
+
+            tensorFeat = torch.cat([tensorVolume], 1)
+
+        elif objectPrevious is not None:
+            tensorFlow = self.moduleUpflow(objectPrevious['tensorFlow']) # 2 channels
+            tensorFeat = self.moduleUpfeat(objectPrevious['tensorFeat']) # reduced to 2 channels
+
+            #Cost volume layer + Warping layer. Output is always 81 channels
+            tensorVolume = torch.nn.functional.leaky_relu(
+                input          = correlation.FunctionCorrelation(
+                                    tensorFirst  = tensorFirst,
+                                    tensorSecond = Backwarp(tensorInput = tensorSecond,
+                                                            tensorFlow  = tensorFlow * self.dblBackwarp,
+                                                            device      = self.device)),
+                negative_slope = 0.1,
+                inplace        = False)
+
+            tensorFeat = torch.cat([tensorVolume, tensorFirst, tensorFlow, tensorFeat], 1)
+        # end
+
+        tensorFeat = torch.cat([self.moduleOne(tensorFeat), tensorFeat], 1)
+        tensorFeat = torch.cat([self.moduleTwo(tensorFeat), tensorFeat], 1)
+        tensorFeat = torch.cat([self.moduleThr(tensorFeat), tensorFeat], 1)
+        tensorFeat = torch.cat([self.moduleFou(tensorFeat), tensorFeat], 1)
+        tensorFeat = torch.cat([self.moduleFiv(tensorFeat), tensorFeat], 1)
+
+        tensorFlow = self.moduleSix(tensorFeat)
+
+        return {
+            'tensorFlow': tensorFlow,
+            'tensorFeat': tensorFeat
+        }
+    # end
+# end
+
+class _Refiner(torch.nn.Module):
+    """The context network. Each convolutional layer is followed by a leaky ReLU unit except the last one that outputs the
+    optical flow. The last number in each convolutional layer denotes the dilation constant.
+    """
+    def __init__(self):
+        super(_Refiner, self).__init__()
+
+        self.moduleMain = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels  = 81 + 32 + 2 + 2 + 128 + 128 + 96 + 64 + 32,
+                            out_channels = 128,
+                            kernel_size  = 3,
+                            stride       = 1,
+                            padding      = 1,
+                            dilation     = 1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=2, dilation=2),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=96, out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+            torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+            torch.nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
+        )
+    # end
+
+    def forward(self, tensorInput):
+        return self.moduleMain(tensorInput)
+    # end
+# end
+
+
 class Network(torch.nn.Module):
     """ Duplicate class from `run.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
@@ -196,267 +463,21 @@ class Network(torch.nn.Module):
         super(Network, self).__init__()
         self.use_checkpoint = use_checkpoint
 
+        self.moduleExtractor = _Extractor()
 
-        class Extractor(torch.nn.Module):
-            """ The feature pyramid extractor network. The first image (t = 1)
-            and the second image (t =2) are encoded using the same Siamese network. Each convolution is followed by a leaky ReLU
-            unit. The convolutional layer and the ×2 downsampling layer at each level is implemented using a single convolutional
-            layer with a stride of 2. c denotes extracted features of image t at level l
-            """
-            def __init__(self):
-                super(Extractor, self).__init__()
+        self.moduleTwo = _Decoder(2, device=device)
+        self.moduleThr = _Decoder(3, device=device)
+        self.moduleFou = _Decoder(4, device=device)
+        self.moduleFiv = _Decoder(5, device=device)
+        self.moduleSix = _Decoder(6, device=device)
 
-                self.moduleOne = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleTwo = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=2, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleThr = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=2, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleFou = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=64, out_channels=96, kernel_size=3, stride=2, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=96, out_channels=96, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=96, out_channels=96, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleFiv = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=96, out_channels=128, kernel_size=3, stride=2, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleSix = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels=128, out_channels=196, kernel_size=3, stride=2, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=196, out_channels=196, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=196, out_channels=196, kernel_size=3, stride=1, padding=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-            # end
-
-            def forward(self, tensorInput):
-                tensorOne = self.moduleOne(tensorInput)
-                tensorTwo = self.moduleTwo(tensorOne)
-                tensorThr = self.moduleThr(tensorTwo)
-                tensorFou = self.moduleFou(tensorThr)
-                tensorFiv = self.moduleFiv(tensorFou)
-                tensorSix = self.moduleSix(tensorFiv)
-
-                return [tensorOne, tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
-            # end
-        # end
-
-        class Decoder(torch.nn.Module):
-            """Each convolutional layer is followed by a leaky ReLU unit except the last one that outputs the optical flow."""
-            def __init__(self, intLevel):
-                super(Decoder, self).__init__()
-
-                intPrevious = [None,
-                               None,
-                               81 + 32 + 2 + 2,
-                               81 + 64 + 2 + 2,
-                               81 + 96 + 2 + 2,
-                               81 + 128 + 2 + 2,
-                               81,
-                               None][intLevel + 1]
-                intCurrent = [None,
-                              None,
-                              81 + 32 + 2 + 2,
-                              81 + 64 + 2 + 2,
-                              81 + 96 + 2 + 2,
-                              81 + 128 + 2 + 2,
-                              81,
-                              None][intLevel + 0]
-
-                if intLevel < 6:
-                    self.moduleUpflow = torch.nn.ConvTranspose2d(in_channels  = 2,
-                                                                 out_channels = 2,
-                                                                 kernel_size  = 4,
-                                                                 stride       = 2,
-                                                                 padding      = 1)
-                    self.moduleUpfeat = torch.nn.ConvTranspose2d(in_channels  = intPrevious + 128 + 128 + 96 + 64 + 32,
-                                                                 out_channels = 2,
-                                                                 kernel_size  = 4,
-                                                                 stride       = 2,
-                                                                 padding      = 1)
-                    self.dblBackwarp = [None, None, None, 5.0, 2.5, 1.25, 0.625, None][intLevel + 1]
-
-                self.moduleOne = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels  = intCurrent,
-                                    out_channels = 128,
-                                    kernel_size  = 3,
-                                    stride       = 1,
-                                    padding      = 1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleTwo = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels  = intCurrent + 128,
-                                    out_channels = 128,
-                                    kernel_size  = 3,
-                                    stride       = 1,
-                                    padding      = 1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleThr = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128,
-                                    out_channels = 96,
-                                    kernel_size  = 3,
-                                    stride       = 1,
-                                    padding      = 1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleFou = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96,
-                                    out_channels = 64,
-                                    kernel_size  = 3,
-                                    stride       = 1,
-                                    padding      = 1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleFiv = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96 + 64,
-                                    out_channels = 32,
-                                    kernel_size  = 3,
-                                    stride       = 1,
-                                    padding      = 1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-
-                self.moduleSix = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels  = intCurrent + 128 + 128 + 96 + 64 + 32,
-                                    out_channels = 2,
-                                    kernel_size  = 3,
-                                    stride       = 1,
-                                    padding      = 1)
-                )
-            # end
-
-            def forward(self, tensorFirst, tensorSecond, objectPrevious):
-                tensorFlow = None
-                tensorFeat = None
-
-                if objectPrevious is None:
-                    tensorFlow = None
-                    tensorFeat = None
-
-                    tensorVolume = torch.nn.functional.leaky_relu(
-                        input          = correlation.FunctionCorrelation(tensorFirst  = tensorFirst,
-                                                                         tensorSecond = tensorSecond),
-                        negative_slope = 0.1,
-                        inplace        = False)
-
-                    tensorFeat = torch.cat([tensorVolume], 1)
-
-                elif objectPrevious is not None:
-                    tensorFlow = self.moduleUpflow(objectPrevious['tensorFlow'])
-                    tensorFeat = self.moduleUpfeat(objectPrevious['tensorFeat'])
-
-                    tensorVolume = torch.nn.functional.leaky_relu(
-                        input          = correlation.FunctionCorrelation(tensorFirst  = tensorFirst,
-                                                                         tensorSecond = Backwarp(tensorInput = tensorSecond,
-                                                                                                 tensorFlow  = tensorFlow * self.dblBackwarp,
-                                                                                                 device      = device)),
-                        negative_slope = 0.1,
-                        inplace        = False)
-
-                    tensorFeat = torch.cat([tensorVolume, tensorFirst, tensorFlow, tensorFeat], 1)
-                # end
-
-                tensorFeat = torch.cat([self.moduleOne(tensorFeat), tensorFeat], 1)
-                tensorFeat = torch.cat([self.moduleTwo(tensorFeat), tensorFeat], 1)
-                tensorFeat = torch.cat([self.moduleThr(tensorFeat), tensorFeat], 1)
-                tensorFeat = torch.cat([self.moduleFou(tensorFeat), tensorFeat], 1)
-                tensorFeat = torch.cat([self.moduleFiv(tensorFeat), tensorFeat], 1)
-
-                tensorFlow = self.moduleSix(tensorFeat)
-
-                return {
-                    'tensorFlow': tensorFlow,
-                    'tensorFeat': tensorFeat
-                }
-            # end
-        # end
-
-        class Refiner(torch.nn.Module):
-            """Each convolutional layer is followed by a leaky ReLU unit except the last one that outputs the optical flow. The
-            last number in each convolutional layer denotes the dilation constant.
-            """
-            def __init__(self):
-                super(Refiner, self).__init__()
-
-                self.moduleMain = torch.nn.Sequential(
-                    torch.nn.Conv2d(in_channels  = 81 + 32 + 2 + 2 + 128 + 128 + 96 + 64 + 32,
-                                    out_channels = 128,
-                                    kernel_size  = 3,
-                                    stride       = 1,
-                                    padding      = 1,
-                                    dilation     = 1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=2, dilation=2),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=96, out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
-                    torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    torch.nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
-                )
-            # end
-
-            def forward(self, tensorInput):
-                return self.moduleMain(tensorInput)
-            # end
-        # end
-
-        self.moduleExtractor = Extractor()
-
-        self.moduleTwo = Decoder(2)
-        self.moduleThr = Decoder(3)
-        self.moduleFou = Decoder(4)
-        self.moduleFiv = Decoder(5)
-        self.moduleSix = Decoder(6)
-
-        self.moduleRefiner = Refiner()
+        self.moduleRefiner = _Refiner()
 
         #self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey,
         #                      tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/github/pytorch-pwc/network-'
         #                                                                          + arguments_strModel + '.pytorch',
         #                                                                      file_name='pwc-' + arguments_strModel).items() })
-    # end
+    # end__init__
 
     def custom(self, module):
         """This is used for Checkpointing
@@ -464,12 +485,13 @@ class Network(torch.nn.Module):
         https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
         """
         def custom_forward(*inputs):
-            if type(module) == type(self.moduleExtractor):
+            if type(module) in [type(self.moduleExtractor), type(self.moduleRefiner)]:
                 inputs = module(inputs[0])
             else:
                 inputs = module(inputs[0], inputs[1], inputs[2])
             return inputs
         return custom_forward
+    # end_custom
 
     def forward(self, tensorFirst, tensorSecond):
         if self.use_checkpoint and self.training:
@@ -480,6 +502,7 @@ class Network(torch.nn.Module):
             #       break there. To get around, you can pass a dummy input which requires grad but isn't necessarily used in
             #       computation.
             dummy_tensor = torch.zeros(1, requires_grad=True)
+            
             tensorFirst  = checkpoint.checkpoint(self.custom(self.moduleExtractor),
                                                  tensorFirst,
                                                  dummy_tensor)
@@ -512,6 +535,10 @@ class Network(torch.nn.Module):
                                                    tensorSecond[-5],
                                                    objectEstimate,
                                                    dummy_tensor)
+
+            objectEstimate['tensorFeat'] = checkpoint.checkpoint(self.custom(self.moduleRefiner),
+                                                                 objectEstimate['tensorFeat'],
+                                                                 dummy_tensor)
         else:
             tensorFirst  = self.moduleExtractor(tensorFirst)
             tensorSecond = self.moduleExtractor(tensorSecond)
@@ -522,6 +549,8 @@ class Network(torch.nn.Module):
             objectEstimate = self.moduleThr(tensorFirst[-4], tensorSecond[-4], objectEstimate)
             objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
 
-        return objectEstimate['tensorFlow'] + self.moduleRefiner(objectEstimate['tensorFeat'])
-    # end
-# end
+            objectEstimate['tensorFeat'] = self.moduleRefiner(objectEstimate['tensorFeat'])
+
+        return objectEstimate['tensorFlow'] + objectEstimate['tensorFeat']
+    # end_forward
+# end_Network
