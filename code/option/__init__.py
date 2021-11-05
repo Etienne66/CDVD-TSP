@@ -50,7 +50,9 @@ parser.add_argument('--n_sequence', type=int, default=5,
 parser.add_argument('--model', default=None,
                     help='model name')
 parser.add_argument('--pre_train', type=Path, default=None,
-                    help='pre-trained model directory')
+                    help='pre-trained model file')
+parser.add_argument('--flow_pre_train', type=Path, default='network-default.pytorch',
+                    help='flow pre-trained model file')
 
 # Training specifications
 parser.add_argument('--test_every', type=int, default=1000,

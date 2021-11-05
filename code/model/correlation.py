@@ -359,15 +359,14 @@ class _FunctionCorrelation(torch.autograd.Function):
 
         # end
 
-        self.save_for_backward(first, second, rbot0, rbot1)
+        self.save_for_backward(first, rbot0, rbot1)
 
         return output
-
     # end_def_forward
 
     @staticmethod
     def backward(self, gradOutput):
-        first, second, rbot0, rbot1 = self.saved_tensors
+        first, rbot0, rbot1 = self.saved_tensors
 
         gradOutput = gradOutput.contiguous(); assert(gradOutput.is_cuda == True)
 
@@ -375,10 +374,10 @@ class _FunctionCorrelation(torch.autograd.Function):
                                      first.shape[1],
                                      first.shape[2],
                                      first.shape[3]]) if self.needs_input_grad[0] == True else None
-        gradSecond = second.new_zeros([second.shape[0],
-                                       second.shape[1],
-                                       second.shape[2],
-                                       second.shape[3]]) if self.needs_input_grad[1] == True else None
+        gradSecond = first.new_zeros([first.shape[0],
+                                      first.shape[1],
+                                      first.shape[2],
+                                      first.shape[3]]) if self.needs_input_grad[1] == True else None
 
         if first.is_cuda == True:
             if gradFirst is not None:
@@ -407,8 +406,8 @@ class _FunctionCorrelation(torch.autograd.Function):
             # end
 
             if gradSecond is not None:
-                for intSample in range(second.shape[0]):
-                    n = second.shape[1] * second.shape[2] * second.shape[3]
+                for intSample in range(first.shape[0]):
+                    n = first.shape[1] * first.shape[2] * first.shape[3]
                     cupy_launch('kernel_Correlation_updateGradSecond',
                                 cupy_kernel('kernel_Correlation_updateGradSecond',
                                             {'rbot0': rbot0,
@@ -433,7 +432,6 @@ class _FunctionCorrelation(torch.autograd.Function):
 
         elif first.is_cuda == False:
             raise NotImplementedError()
-
         # end
 
         return gradFirst, gradSecond

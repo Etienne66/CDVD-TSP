@@ -117,7 +117,10 @@ class RECONS_VIDEO(nn.Module):
             #       break there. To get around, you can pass a dummy input which requires grad but isn't necessarily used in
             #       computation.
             dummy_tensor = torch.zeros(1, requires_grad=True)
-            first_scale_inblock = checkpoint.checkpoint(self.custom(self.inBlock),x)
+
+            first_scale_inblock = checkpoint.checkpoint(self.custom(self.inBlock),
+                                                        x,
+                                                        dummy_tensor)
             first_scale_encoder_first = checkpoint.checkpoint(self.custom(self.encoder_first),
                                                               first_scale_inblock,
                                                               dummy_tensor)
@@ -141,6 +144,4 @@ class RECONS_VIDEO(nn.Module):
             first_scale_decoder_first = self.decoder_first(first_scale_decoder_second + first_scale_encoder_first)
             first_scale_outBlock = self.outBlock(first_scale_decoder_first + first_scale_inblock)
 
-        mid_loss = None
-
-        return first_scale_outBlock, mid_loss
+        return first_scale_outBlock

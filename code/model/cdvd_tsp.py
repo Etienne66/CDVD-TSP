@@ -8,7 +8,8 @@ from utils import utils
 def make_model(args):
     device = 'cpu' if args.cpu else 'cuda'
 # No need to load the pretrained flow network if doing a resume or loading a pretrained deblur model
-    load_flow_net = False if args.resume or args.pre_train != '.' else True
+    #load_flow_net = False if args.resume or args.pre_train is not None else True
+    load_flow_net = False
     load_recons_net = False
     flow_pretrain_fn = args.pretrain_models_dir / 'network-default.pytorch'
     recons_pretrain_fn = ''
@@ -125,7 +126,7 @@ class CDVD_TSP(nn.Module):
         luckiness = self.get_masks(frame_warp_list, flow_mask_list)
 
         concated = torch.cat([warped01, Frame1, warped21, luckiness], dim=1)
-        reconstructed, _ = self.recons_net(concated)
+        reconstructed = self.recons_net(concated)
 
         return reconstructed
 

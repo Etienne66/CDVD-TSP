@@ -11,7 +11,7 @@ class Model(nn.Module):
         super(Model, self).__init__()
         print('Making model...')
         self.args = args
-        self.pretrain_models_dir = Path(args.pretrain_models_dir)
+        self.pretrain_models_dir = args.pretrain_models_dir
         epoch = len(ckp.psnr_log)
         self.cpu = args.cpu
         self.device = torch.device('cpu' if args.cpu else 'cuda')
@@ -53,18 +53,18 @@ class Model(nn.Module):
         target = self.get_model()
         torch.save(
             target.state_dict(),
-            Path(apath / 'model' / 'model_latest.pt')
+            apath / 'model' / 'model_latest.pt'
         )
         if is_best:
             torch.save(
                 target.state_dict(),
-                Path(apath / 'model' / 'model_best.pt')
+                apath / 'model' / 'model_best.pt'
             )
         if self.save_middle_models:
             if epoch % 1 == 0:
                 torch.save(
                     target.state_dict(),
-                    Path(apath / 'model' / 'model_{}.pt'.format(epoch))
+                    apath / 'model' / 'model_{}.pt'.format(epoch)
                 )
 
     def load(self, apath, pre_train=None, resume=False, cpu=False):  #
@@ -75,16 +75,16 @@ class Model(nn.Module):
 
     # A resume takes precedence over test_only and test_only takes precedence over pre_train
         if resume:
-            print('Loading model from {}'.format(str(Path(apath / 'model' / 'model_latest.pt'))))
+            print('Loading model from {}'.format(apath / 'model' / 'model_latest.pt'))
             self.get_model().load_state_dict(
-                torch.load(Path(apath / 'model' / 'model_latest.pt'), **kwargs),
+                torch.load(apath / 'model' / 'model_latest.pt', **kwargs),
                 strict=False
             )
             self.args.load = self.args.save
         elif self.args.test_only:
-            print('Loading model from {}'.format(str(Path(apath / 'model' / 'model_best.pt'))))
+            print('Loading model from {}'.format(apath / 'model' / 'model_best.pt'))
             self.get_model().load_state_dict(
-                torch.load(Path(apath / 'model' / 'model_best.pt'), **kwargs),
+                torch.load(apath / 'model' / 'model_best.pt', **kwargs),
                 strict=False
             )
         elif pre_train is not None:

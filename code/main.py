@@ -22,9 +22,9 @@ if platform.system() == 'Windows':
     # You can force synchronous computation by setting environment variable CUDA_LAUNCH_BLOCKING=1. This can be handy when an error occurs on the GPU. (With asynchronous execution, such an error isn't reported until after the operation is actually executed, so the stack trace does not show where it was requested.)
     # https://pytorch.org/docs/stable/notes/cuda.html
     # to debug cupy_backends.cuda.api.driver.CUDADriverError: CUDA_ERROR_ILLEGAL_ADDRESS: an illegal memory access was encountered
-    env = 'CUDA_LAUNCH_BLOCKING'
-    if env not in os.environ:
-        os.environ[env] = '1'
+#    env = 'CUDA_LAUNCH_BLOCKING'
+#    if env not in os.environ:
+#        os.environ[env] = '1'
 
 import torch
 import data
@@ -40,13 +40,10 @@ import traceback
 if __name__ == '__main__':
     args = option.args
     torch.manual_seed(args.seed)
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True
     random.seed(args.seed)
     np.random.seed(args.seed)
-    if float(torch.version.cuda) >= 11.0:
-        torch.backends.cudnn.enabled = False
-    else:
-        torch.backends.cudnn.enabled = True
-        torch.backends.cudnn.benchmark = True
     chkp = logger.Logger(args)
 
     try:

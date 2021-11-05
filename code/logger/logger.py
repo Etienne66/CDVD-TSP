@@ -47,7 +47,7 @@ class Logger:
             if not Path(self.dir / 'model').exists():
                 Path(self.dir / 'model').mkdir(parents=True)
         if not Path(self.dir / 'result' / self.args.data_test).exists():
-            print("Creating dir for saving images...", str(Path((self.dir / 'result' / self.args.data_test))))
+            print("Creating dir for saving images...{}".format(self.dir / 'result' / self.args.data_test))
             Path(self.dir / 'result' / self.args.data_test).mkdir(parents=True)
 
         print('Save Path : {}'.format(self.dir))
@@ -81,11 +81,11 @@ class Logger:
 
     def save(self, trainer, epoch, is_best):
         trainer.model.save(self.dir, epoch, is_best)
-        torch.save(self.ssim_log, Path(self.dir / 'ssim_log.pt'))
-        torch.save(self.psnr_log, Path(self.dir / 'psnr_log.pt'))
-        torch.save(self.lr_log, Path(self.dir / 'lr_log.pt'))
-        torch.save(trainer.optimizer.state_dict(), Path(self.dir / 'optimizer.pt'))
-        torch.save(trainer.scheduler.state_dict(), Path(self.dir / 'scheduler.pt'))
+        torch.save(self.ssim_log, self.dir / 'ssim_log.pt')
+        torch.save(self.psnr_log, self.dir / 'psnr_log.pt')
+        torch.save(self.lr_log, self.dir / 'lr_log.pt')
+        torch.save(trainer.optimizer.state_dict(), self.dir / 'optimizer.pt')
+        torch.save(trainer.scheduler.state_dict(), self.dir / 'scheduler.pt')
         rng_state = torch.get_rng_state()
         random_state = random.getstate()
         numpy_random_state = np.random.get_state()
@@ -97,7 +97,7 @@ class Logger:
                     'random_state': random_state,
                     'numpy_random_state': numpy_random_state
                    },
-                   Path(self.dir / 'checkpoint.tar'))
+                   self.dir / 'checkpoint.tar')
         trainer.loss.save(self.dir)
         if epoch > 1:
             trainer.loss.plot_loss(self.dir, epoch)
@@ -108,7 +108,7 @@ class Logger:
     def save_images(self, filename, save_list, epoch):
         if self.args.task == 'VideoDeblur':
             f = filename.split('.')
-            dirname = Path(self.dir / 'result' / self.args.data_test / f[0])
+            dirname = self.dir / 'result' / self.args.data_test / f[0]
             if not dirname.exists():
                 dirname.mkdir
             filename = '{}/{}'.format(dirname, f[1])

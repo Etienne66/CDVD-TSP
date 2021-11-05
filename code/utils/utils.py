@@ -26,7 +26,7 @@ def get_patch(*args, patch_size=17, scale=1):
     return ret
 
 
-def get_patch_frames(*args, patch_size=17, scale=1):
+def get_patch_frames(*args, patch_size=256, scale=1):
     """
     Get patch from an image for NHWC order
     """

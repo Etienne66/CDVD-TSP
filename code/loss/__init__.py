@@ -100,6 +100,7 @@ class Loss(nn.modules.loss._Loss):
         if args.load is not None:
             self.load(ckp.dir, cpu=args.cpu)
 
+
     def forward(self, sr, hr):
         output_images = torch.chunk(sr, self.frames_per_stage, dim=1)
         gt_images = torch.chunk(hr, self.frames_per_stage, dim=1)
@@ -129,16 +130,20 @@ class Loss(nn.modules.loss._Loss):
         else:
             return loss_sum
 
+
     def step(self):
         for l in self.get_loss_module():
             if hasattr(l, 'scheduler'):
                 l.scheduler.step()
 
+
     def start_log(self):
         self.log = torch.cat((self.log, torch.zeros([1, len(self.loss), self.stages])))
 
+
     def end_log(self, n_batches):
         self.log[-1,:,:].div_(n_batches)
+
 
     def display_loss(self, batch):
         n_samples = batch + 1
@@ -159,6 +164,7 @@ class Loss(nn.modules.loss._Loss):
                 log.append('[{}: {:.2f}({:.6f})]'.format(l['type'], l['weight'], loss / (n_samples * self.stages)))
 
         return ''.join(log)
+
 
     def display_loss_stage(self, batch, stage):
         n_samples = batch + 1
@@ -232,7 +238,8 @@ class Loss(nn.modules.loss._Loss):
                         exit()
                 plt.close(fig)
                 plt.close()
-    
+
+
     def plot_iteration_loss(self, loss_array, lr_array, apath, iterations, epoch, stages, running_average):
         round_length = round(running_average / 2)
         if len(lr_array) + round_length < iterations:
@@ -293,16 +300,17 @@ class Loss(nn.modules.loss._Loss):
         plt.close()
 
 
-
     def get_loss_module(self):
         if self.n_GPUs == 1:
             return self.loss_module
         else:
             return self.loss_module.module
 
+
     def save(self, apath):
-        torch.save(self.state_dict(), Path(apath / 'loss_state.pt'))
-        torch.save(self.log, Path(apath / 'loss_log.pt'))
+        torch.save(self.state_dict(), apath / 'loss_state.pt')
+        torch.save(self.log, apath / 'loss_log.pt')
+
 
     def load(self, apath, cpu=False):
         if cpu:
@@ -311,10 +319,10 @@ class Loss(nn.modules.loss._Loss):
             kwargs = {}
 
         self.load_state_dict(torch.load(
-            Path(apath / 'loss_state.pt'),
+            apath / 'loss_state.pt',
             **kwargs
         ))
-        self.log = torch.load(Path(apath / 'loss_log.pt'))
+        self.log = torch.load(apath / 'loss_log.pt')
         for l in self.loss_module:
             if hasattr(l, 'scheduler'):
                 for _ in range(len(self.log)): l.scheduler.step()

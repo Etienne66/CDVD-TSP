@@ -76,7 +76,7 @@ class Trainer_CDVD_TSP(Trainer):
 
     
     def train(self):
-        r"""Train the model
+        """Train the model
         Args:
             self (object): an object with many variables
 
@@ -114,7 +114,7 @@ class Trainer_CDVD_TSP(Trainer):
         number_of_batches = len(self.loader_train)
         start_time = train_start_time
         total_preprocess_time = total_forward_time = total_loss_time = total_backward_time = timedelta(days=0)
-        total_optimizer_time = total_scheduler_time = total_time = timedelta(days=0)
+        total_optimizer_time = total_scheduler_time = total_time = total_postprocess_time = timedelta(days=0)
         if self.args.plot_running_average:
         # Setup arrays to be used for plots
             loss_array = np.zeros((1,stages))
@@ -166,18 +166,10 @@ class Trainer_CDVD_TSP(Trainer):
                         frames_completed,
                         frames_total,
                         decimal.Decimal(lr)))
-                total_preprocess_time += preprocess_time - start_time
-                total_forward_time += forward_time - preprocess_time
-                total_loss_time += loss_time - forward_time
-                total_backward_time += backward_time - loss_time
-                total_optimizer_time += optimizer_time - backward_time
-                total_scheduler_time += scheduler_time - optimizer_time
-                total_time += scheduler_time - start_time
-                start_time = scheduler_time
                 if (self.args.plot_running_average
                     #and batch > 0
                     and (   (batch + 1) % self.args.running_average == 0
-                         or batch == len(self.loader_train))
+                         or batch + 1 == len(self.loader_train))
                     ):
                     with torch.set_grad_enabled(False):
                         self.loss.plot_iteration_loss(
@@ -188,6 +180,16 @@ class Trainer_CDVD_TSP(Trainer):
                             epoch           = epoch,
                             stages          = stages,
                             running_average = self.args.running_average)
+                postprocess_time = datetime.now()
+                total_preprocess_time += preprocess_time - start_time
+                total_forward_time += forward_time - preprocess_time
+                total_loss_time += loss_time - forward_time
+                total_backward_time += backward_time - loss_time
+                total_optimizer_time += optimizer_time - backward_time
+                total_scheduler_time += scheduler_time - optimizer_time
+                total_time += scheduler_time - start_time
+                total_postprocess_time += postprocess_time - scheduler_time
+                start_time = datetime.now()
 
             tqdm_train.close()
         for stage in range(stages):
@@ -200,9 +202,10 @@ class Trainer_CDVD_TSP(Trainer):
             total_loss_time,
             total_backward_time))
         iterations_per_second = total_time/len(self.loader_train)
-        self.ckp.write_log('\t[Optimizer: {}][Scheduler: {}]\t\t[Total: {}][{:.6f}s/it]'.format(
+        self.ckp.write_log('\t[Optimizer: {}][Scheduler: {}][Post: {}]\t[Total: {}][{:.6f}s/it]'.format(
             total_optimizer_time,
             total_scheduler_time,
+            total_postprocess_time,
             total_time,
             iterations_per_second.total_seconds()))
 
