@@ -6,7 +6,7 @@ __author__ = "Jinshan Pan, Haoran Bai, and Jinhui Tang"
 __copyright__ = "Copyright 2007, The Cogent Project"
 __credits__ = ["Jinshan Pan", "Haoran Bai", "Jinhui Tang", "Steven Wilson"]
 __license__ = "MIT"
-__version__ = "2.0.1"
+__version__ = "2.0.2"
 __maintainer__ = "Steven Wilson"
 __email__ = "Etienne66"
 __status__ = "Development"
@@ -36,6 +36,7 @@ from logger import logger
 import random
 import numpy as np
 import traceback
+import winsound
 
 if __name__ == '__main__':
     args = option.args
@@ -62,9 +63,22 @@ if __name__ == '__main__':
         else:
             raise NotImplementedError('Task [{:s}] is not found'.format(args.task))
 
-    #except:
-    #    traceback.print_exc()
-    #    exit()
+        if platform.system() == 'Windows':
+            winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS)
+        elif platform.system() == 'Darwin':
+            os.system('say "Your CDVD-TSP program has finished"')
+        elif platform.system() == 'Linux':
+            os.system('spd-say "Your CDVD-TSP program has finished"')
+
+    except:
+        traceback.print_exc()
+        if platform.system() == 'Windows':
+            winsound.PlaySound("SystemHand", winsound.SND_ALIAS)
+        elif platform.system() == 'Darwin':
+            os.system('say "Your CDVD-TSP program has crashed"')
+        elif platform.system() == 'Linux':
+            os.system('spd-say "Your CDVD-TSP program has crashed"')
+        #exit()
 
     finally:
         if platform.system() == 'Windows':

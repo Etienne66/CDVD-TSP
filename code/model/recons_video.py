@@ -23,12 +23,15 @@ class RECONS_VIDEO(nn.Module):
                  extra_channels = 0,
                  feat_in        = False,
                  n_in_feat      = 1,
-                 use_checkpoint = False):
+                 use_checkpoint = False,
+                 original_model = True,
+                 device         = 'cuda' ):
         super(RECONS_VIDEO, self).__init__()
         print("Creating Recons-Video Net")
 
         self.feat_in = feat_in
         self.use_checkpoint = use_checkpoint
+        self.device = device
 
         if not extra_channels == 0:
             print("SRN Video Net extra in channels: {}".format(extra_channels))
@@ -47,7 +50,7 @@ class RECONS_VIDEO(nn.Module):
                 nn.ReLU(inplace=True)
             )])
             print("The input of SRN is feature")
-        InBlock.extend([blocks.ResBlock(n_feat, n_feat, kernel_size=kernel_size, stride=1)
+        InBlock.extend([blocks.ResBlock(n_feat, n_feat, kernel_size=kernel_size, stride=1, original_model=original_model)
                         for _ in range(n_resblock)])
 
         # encoder1
@@ -55,32 +58,32 @@ class RECONS_VIDEO(nn.Module):
             nn.Conv2d(n_feat, n_feat * 2, kernel_size=kernel_size, stride=2, padding=kernel_size // 2),
             nn.ReLU(inplace=True)
         )]
-        Encoder_first.extend([blocks.ResBlock(n_feat * 2, n_feat * 2, kernel_size=kernel_size, stride=1)
+        Encoder_first.extend([blocks.ResBlock(n_feat * 2, n_feat * 2, kernel_size=kernel_size, stride=1, original_model=original_model)
                               for _ in range(n_resblock)])
         # encoder2
         Encoder_second = [nn.Sequential(
             nn.Conv2d(n_feat * 2, n_feat * 4, kernel_size=kernel_size, stride=2, padding=kernel_size // 2),
             nn.ReLU(inplace=True)
         )]
-        Encoder_second.extend([blocks.ResBlock(n_feat * 4, n_feat * 4, kernel_size=kernel_size, stride=1)
+        Encoder_second.extend([blocks.ResBlock(n_feat * 4, n_feat * 4, kernel_size=kernel_size, stride=1, original_model=original_model)
                                for _ in range(n_resblock)])
 
         # decoder2
-        Decoder_second = [blocks.ResBlock(n_feat * 4, n_feat * 4, kernel_size=kernel_size, stride=1)
+        Decoder_second = [blocks.ResBlock(n_feat * 4, n_feat * 4, kernel_size=kernel_size, stride=1, original_model=original_model)
                           for _ in range(n_resblock)]
         Decoder_second.append(nn.Sequential(
             nn.ConvTranspose2d(n_feat * 4, n_feat * 2, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(inplace=True)
         ))
         # decoder1
-        Decoder_first = [blocks.ResBlock(n_feat * 2, n_feat * 2, kernel_size=kernel_size, stride=1)
+        Decoder_first = [blocks.ResBlock(n_feat * 2, n_feat * 2, kernel_size=kernel_size, stride=1, original_model=original_model)
                          for _ in range(n_resblock)]
         Decoder_first.append(nn.Sequential(
             nn.ConvTranspose2d(n_feat * 2, n_feat, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(inplace=True)
         ))
 
-        OutBlock = [blocks.ResBlock(n_feat, n_feat, kernel_size=kernel_size, stride=1)
+        OutBlock = [blocks.ResBlock(n_feat, n_feat, kernel_size=kernel_size, stride=1, original_model=original_model)
                     for _ in range(n_resblock)]
         OutBlock.append(
             nn.Conv2d(n_feat, out_channels, kernel_size=kernel_size, stride=1, padding=kernel_size // 2)
@@ -116,7 +119,7 @@ class RECONS_VIDEO(nn.Module):
             #       passed as is, the output of Checkpoint will be variable which don't require grad and autograd tape will
             #       break there. To get around, you can pass a dummy input which requires grad but isn't necessarily used in
             #       computation.
-            dummy_tensor = torch.zeros(1, requires_grad=True)
+            dummy_tensor = torch.zeros(1, device=self.device, requires_grad=True)
 
             first_scale_inblock = checkpoint.checkpoint(self.custom(self.inBlock),
                                                         x,

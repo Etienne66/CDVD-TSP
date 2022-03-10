@@ -74,7 +74,7 @@ def _ssim(X, Y, data_range, win, size_average=True, K=(0.01, 0.03)):
     C1 = (K1 * data_range) ** 2
     C2 = (K2 * data_range) ** 2
 
-    win = win.to(device=X.device, dtype=X.dtype, memory_format=torch.contiguous_format)
+    win = win.to(device=X.device, dtype=X.dtype)
 
     mu1 = gaussian_filter(X, win)
     mu2 = gaussian_filter(Y, win)

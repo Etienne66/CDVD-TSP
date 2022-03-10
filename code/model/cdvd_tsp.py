@@ -8,10 +8,21 @@ from utils import utils
 def make_model(args):
     device = 'cpu' if args.cpu else 'cuda'
 # No need to load the pretrained flow network if doing a resume or loading a pretrained deblur model
-    #load_flow_net = False if args.resume or args.pre_train is not None else True
-    load_flow_net = False
+    if not(args.resume) and args.pre_train is None:
+        load_flow_net = not(args.skip_load_flow_net)
+        flow_pretrain_fn = args.pretrain_models_dir / args.flow_pre_train
+    elif args.pre_train is not None and args.original_model:
+        load_flow_net = True
+        flow_pretrain_fn = None
+    else:
+        load_flow_net = False
+        flow_pretrain_fn = None
+        
     load_recons_net = False
-    flow_pretrain_fn = args.pretrain_models_dir / 'network-default.pytorch'
+    
+    #Don't use new model so pretrained models can be used with minimal retraining.
+    #args.original_model = True
+
     recons_pretrain_fn = ''
     is_mask_filter = True
     return CDVD_TSP(in_channels        = args.n_colors,
@@ -25,7 +36,8 @@ def make_model(args):
                     recons_pretrain_fn = recons_pretrain_fn,
                     is_mask_filter     = is_mask_filter,
                     device             = device,
-                    use_checkpoint     = args.use_checkpoint)
+                    use_checkpoint     = args.use_checkpoint,
+                    original_model     = args.original_model)
 
 
 class CDVD_TSP(nn.Module):
@@ -38,48 +50,55 @@ class CDVD_TSP(nn.Module):
                  n_feat             = 32,
                  load_flow_net      = False,
                  load_recons_net    = False,
-                 flow_pretrain_fn   = '',
+                 flow_pretrain_fn   = None,
                  recons_pretrain_fn = '',
                  is_mask_filter     = False,
                  device             = 'cuda',
-                 use_checkpoint     = False):
+                 use_checkpoint     = False,
+                 original_model     = True):
         super(CDVD_TSP, self).__init__()
         print("Creating CDVD-TSP Net")
 
         self.n_sequence = n_sequence
         self.device = device
 
-        assert n_sequence in [3,5,7], "Only support args.n_sequence in [3,5,7]; but get args.n_sequence={}".format(n_sequence)
+        assert n_sequence in [3,5,7], \
+            "Only support args.n_sequence in [3,5,7]; but get args.n_sequence={}".format(n_sequence)
 
-    # Temporal Sharpness Prior
+        # Temporal Sharpness Prior
         self.is_mask_filter = is_mask_filter
         print('Is meanfilter image when process mask:', 'True' if is_mask_filter else 'False')
         extra_channels = 1
         print('Select mask mode: concat, num_mask={}'.format(extra_channels))
 
-    # This is the pytorch-pwc model developed by sniklaus for optical flow estimation
-    # The model will be trained as well but their is no direct loss calculation since there are no optical flow estimations
-    # ground truth for the DVD, GOPRO or REDS datasets.
+        # This is the pytorch-pwc model developed by sniklaus for optical flow estimation
+        # The model will be trained as well but their is no direct loss calculation since there are no optical flow estimations
+        # ground truth for the DVD, GOPRO or REDS datasets.
         self.flow_net = flow_pwc.Flow_PWC(load_pretrain  = load_flow_net,
                                           pretrain_fn    = flow_pretrain_fn,
                                           device         = device,
                                           use_checkpoint = use_checkpoint)
+        
 
-    # recons_net only works on 3 frames. More frames are done by cascaded training
+        # recons_net only works on 3 frames. More frames are done by cascaded training
         self.recons_net = recons_video.RECONS_VIDEO(in_channels    = in_channels,
                                                     n_sequence     = 3,
                                                     out_channels   = out_channels,
                                                     n_resblock     = n_resblock,
                                                     n_feat         = n_feat,
                                                     extra_channels = extra_channels,
-                                                    use_checkpoint = use_checkpoint)
-        if load_recons_net:
-            print('Loading reconstruction pretrain model from {}'.format(recons_pretrain_fn))
-            self.recons_net.load_state_dict(torch.load(recons_pretrain_fn))
+                                                    use_checkpoint = use_checkpoint,
+                                                    original_model = original_model,
+                                                    device         = device)
+        #if load_recons_net:
+        #    print('Loading reconstruction pretrain model from {}'.format(recons_pretrain_fn))
+        #    self.recons_net.load_state_dict(torch.load(recons_pretrain_fn))
+
 
     def get_masks(self, img_list, flow_mask_list):
-    # Temporal Sharpness Prior
-    # Which pixels of the adjacent frames are sharp
+        """ Temporal Sharpness Prior
+        Which pixels of the adjacent frames are sharp
+        """
         num_frames = len(img_list)
 
         #img_list_copy = [img.detach() for img in img_list]  # detach backward
@@ -125,8 +144,8 @@ class CDVD_TSP(nn.Module):
         # Get the Temporal Sharpness Prior mask
         luckiness = self.get_masks(frame_warp_list, flow_mask_list)
 
-        concated = torch.cat([warped01, Frame1, warped21, luckiness], dim=1)
-        reconstructed = self.recons_net(concated)
+        concatenated = torch.cat([warped01, Frame1, warped21, luckiness], dim=1)
+        reconstructed = self.recons_net(concatenated)
 
         return reconstructed
 

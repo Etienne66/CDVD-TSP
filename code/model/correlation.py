@@ -257,8 +257,11 @@ def cupy_kernel(strFunction, objectVariables):
 
         strTensor = objectMatch.group(4)
         intSizes = objectVariables[strTensor].size()
+        if torch.is_tensor(intSizes[intArg]):
+            strKernel = strKernel.replace(objectMatch.group(), str(intSizes[intArg].detach().item()))
+        else:
+            strKernel = strKernel.replace(objectMatch.group(), str(intSizes[intArg]))
 
-        strKernel = strKernel.replace(objectMatch.group(), str(intSizes[intArg]))
     # end
 
     while True:
@@ -288,8 +291,8 @@ def cupy_kernel(strFunction, objectVariables):
 def cupy_launch(strFunction, strKernel):
     """ Duplicate function from `correlation.py` of
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
-    
     """
+
     return cupy.cuda.compile_with_cache(strKernel).get_function(strFunction)
 # end
 

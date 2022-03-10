@@ -1,6 +1,5 @@
 import torch
 import imageio
-from torchvision.utils import save_image
 import numpy as np
 import os
 import datetime
@@ -103,7 +102,8 @@ class Logger:
             trainer.loss.plot_loss(self.dir, epoch)
             self.plot_psnr_log(epoch)
             self.plot_ssim_log(epoch)
-            self.plot_lr_log(epoch)
+            if self.args.OneCycleLR or self.args.StepLR:
+                self.plot_lr_log(epoch)
 
     def save_images(self, filename, save_list, epoch):
         if self.args.task == 'VideoDeblur':

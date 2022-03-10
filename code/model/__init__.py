@@ -20,6 +20,9 @@ class Model(nn.Module):
 
         module = import_module('model.' + args.model.lower())
         self.model = module.make_model(args).to(self.device)
+        self.original_model = args.original_model
+        self.load_flow_net = not(args.skip_load_flow_net)
+        
         if not args.cpu and args.n_GPUs > 1:
             # Need to change to DistributedDataParallel
             self.model = nn.DataParallel(self.model, range(args.n_GPUs))
@@ -31,9 +34,64 @@ class Model(nn.Module):
             cpu       = args.cpu
         )
         
+        if args.lr_finder:
+            #pass
+            self.model.flow_net.moduleNetwork.moduleExtractor.moduleSix = torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=128, out_channels=192, kernel_size=3, stride=2, padding=1),
+                torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                torch.nn.Conv2d(in_channels=192, out_channels=192, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                torch.nn.Conv2d(in_channels=192, out_channels=192, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+            ).to(self.device)
+            #print("reset recons_net and freeze flow_net")
+            self.reset_all_weights(self.get_model().recons_net)
+            #for param in self.get_model().flow_net.parameters():
+            #    param.requires_grad = False
+
+            #print("reset flow_net and freeze recons_net")
+            self.reset_all_weights(self.get_model().flow_net)
+            #for param in self.get_model().recons_net.parameters():
+            #    param.requires_grad = False
+            
+        #elif False:
+        elif (not args.resume and self.load_flow_net) or (self.original_model and args.pre_train is not None):
+        # Update Extractor.modeuleSix due to memory leak when 196 channels was used. Because of correlation it needs to be a
+        # multiple of 32. Changed 196 to 192
+            self.model.flow_net.moduleNetwork.moduleExtractor.moduleSix = torch.nn.Sequential(
+                torch.nn.Conv2d(in_channels=128, out_channels=192, kernel_size=3, stride=2, padding=1),
+                torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                torch.nn.Conv2d(in_channels=192, out_channels=192, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                torch.nn.Conv2d(in_channels=192, out_channels=192, kernel_size=3, stride=1, padding=1),
+                torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
+            ).to(self.device)
+            print('flow_net.moduleNetwork.moduleExtractor.moduleSix updated')
+        
+        #self.model = self.model.to(self.device)
+        
+
         if not args.lr_finder and epoch == 0:
             print(self.get_model(), file=ckp.config_file)
             ckp.config_file.close()
+
+    def reset_all_weights(self, model: nn.Module) -> None:
+        """
+        refs:
+            - https://discuss.pytorch.org/t/how-to-re-set-alll-parameters-in-a-network/20819/6
+            - https://stackoverflow.com/questions/63627997/reset-parameters-of-a-neural-network-in-pytorch
+            - https://pytorch.org/docs/stable/generated/torch.nn.Module.html
+        """
+
+        @torch.no_grad()
+        def weight_reset(m: nn.Module):
+            # - check if the current module has reset_parameters & if it's callable, call it on m
+            reset_parameters = getattr(m, "reset_parameters", None)
+            if callable(reset_parameters):
+                m.reset_parameters()
+
+        # Applies fn recursively to every submodule see: https://pytorch.org/docs/stable/generated/torch.nn.Module.html
+        model.apply(fn=weight_reset)
 
 
     def forward(self, *args):
@@ -95,3 +153,5 @@ class Model(nn.Module):
             )
         else:
             pass
+        
+

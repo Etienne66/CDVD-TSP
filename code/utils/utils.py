@@ -1,9 +1,12 @@
 import random
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
+#import torchvision.transforms.functional as TVTF
 import numpy as np
 import math
-
+#from torchvision import transforms
+from PIL import Image
 
 def get_patch(*args, patch_size=17, scale=1):
     """
@@ -35,18 +38,25 @@ def get_patch_frames(*args, patch_size=256, scale=1):
     ip = patch_size
     tp = scale * ip
 
-    ix = random.randrange(0, iw - ip + 1)
-    iy = random.randrange(0, ih - ip + 1)
+    if ip < iw:
+        ix = random.randrange(0, iw - ip + 1)
+    else:
+        ix = 0
+    if ip < ih:
+        iy = random.randrange(0, ih - ip + 1)
+    else:
+        iy = 0
     tx, ty = scale * ix, scale * iy
 
     ret = [
         args[0][:, iy:iy + ip, ix:ix + ip, :],
-        *[a[:, ty:ty + tp, tx:tx + tp, :] for a in args[1:]]
+        args[1][:, ty:ty + tp, tx:tx + tp, :]
     ]
 
     return ret
 
-def np2Tensor(*args, rgb_range=1.):
+
+def np2Tensor(*args, rgb_range=1., device='cpu'):
     def _np2Tensor(img):
         """Convert Numpy to Tensor but is still on CPU but ready for GPU
 
@@ -60,9 +70,9 @@ def np2Tensor(*args, rgb_range=1.):
         #np_transpose = np.ascontiguousarray(img.transpose((2, 0, 1)))  # NHWC -> NCHW
         #tensor = torch.from_numpy(np_transpose).float()                # numpy -> tensor
         #tensor.mul_(rgb_range / 255.0)                                 # (0,255) -> (0,1)
-        img = np.ascontiguousarray(img.transpose((2, 0, 1)), dtype=np.float32)  # NHWC -> NCHW
-        img *= rgb_range / 255.0                                                # (0,255) -> (0,1)
-        tensor = torch.from_numpy(img)                                          # numpy -> tensor
+        img = np.ascontiguousarray(img, dtype=np.float32)  # NHWC -> NCHW
+        tensor = torch.from_numpy(img).permute((2, 0, 1))  # numpy -> tensor
+        tensor.mul_(rgb_range / 255.0)                     # (0,255) -> (0,1)
 
         return tensor
 
@@ -95,19 +105,43 @@ def data_augment(*args, hflip=True, rot=True):
     return [_augment(a) for a in args]
 
 
-def data_augment_frames(*args, hflip=True, rot=True):
+def data_augment_frames(*args, hflip=True, vflip=True, rot=True):
     hflip = hflip and random.random() < 0.5
-    vflip = rot and random.random() < 0.5
+    vflip = vflip and random.random() < 0.5
     rot90 = rot and random.random() < 0.5
 
     def _augment(img):
-        # Image in NHWC order
+        # Image in NCHWC order
         if hflip:
-            img = img[:, :, ::-1, :]
+            img = np.flip(img, axis=2)
         if vflip:
-            img = img[:, ::-1, :, :]
+            img = np.flip(img, axis=1)
         if rot90:
             img = np.rot90(img, axes=(1,2))
+
+        return img
+
+    return [_augment(a) for a in args]
+
+
+def data_augment_tensors(*args, hflip=True, vflip=True, rot=True):
+    hflip = hflip and random.random() < 0.5
+    vflip = vflip and random.random() < 0.5
+    rot90 = rot and random.random() < 0.5
+
+    def _augment(img):
+        # Image in BNCHW order
+        #print()
+        #print("img.size before: ", img.size())
+        if hflip:
+            img = torch.flip(img, dims=(4,))
+        if vflip:
+            img = torch.flip(img, dims=(3,))
+        if rot90:
+            img = torch.rot90(img, k=1, dims=[3,4])
+            #pil_img = transforms.ToPILImage()(img[0][0]).convert("RGB")
+            #pil_img.show()
+        #print("img.size after: ", img.size())
 
         return img
 
@@ -182,6 +216,7 @@ def calc_meanFilter(img, kernel_size=11, n_channel=1, device='cuda'):
                                              stride=1, padding=kernel_size // 2)
     return new_img
 
+
 def calc_meanFilter_torch(img, kernel_size=11, n_channel=1, device='cuda'):
     mean_filter_X = torch.ones(size   = (1, 1, kernel_size, kernel_size),
                                dtype  = torch.float32,
@@ -195,3 +230,81 @@ def calc_meanFilter_torch(img, kernel_size=11, n_channel=1, device='cuda'):
                                              stride  = 1,
                                              padding = kernel_size // 2)
     return new_img
+
+
+class EPE(nn.Module):
+    def __init__(self, device='cuda', mean=True):
+        super(EPE, self).__init__()
+        self.mean = mean
+
+    def epe(self, input_flow, target_flow):
+        """
+        End-point-Error computation
+        Args:
+            input_flow: estimated flow [BxHxW,2]
+            target_flow: ground-truth flow [BxHxW,2]
+        Output:
+            Averaged end-point-error (value)
+        """
+        EPE_loss = torch.norm(target_flow - input_flow, p=2, dim=1)
+        if self.mean:
+            EPE_loss = EPE_loss.mean()
+        return EPE_loss
+
+    def forward(self, input_flow, target_flow):
+        epe_loss = self.epe(input_flow, target_flow)
+
+        return epe_loss
+
+
+class F1_KITTI_2015(nn.Module):
+    def __init__(self, device='cuda', tau=[3.0, 0.05]):
+        super(F1_KITTI_2015, self).__init__()
+        self.tau = tau
+
+    def f1_kitti_2015(self, input_flow, target_flow):
+        """
+        Computation number of outliers
+        for which error > 3px(tau[0]) and error/magnitude(ground truth flow) > 0.05(tau[1])
+        Args:
+            input_flow: estimated flow [BxHxW,2]
+            target_flow: ground-truth flow [BxHxW,2]
+            alpha: threshold
+            img_size: image size
+        Output:
+            PCK metric
+
+        function f_err = flow_error (F_gt,F_est,tau)
+            [E,F_val] = flow_error_map (F_gt,F_est);
+            F_mag = sqrt(F_gt(:,:,1).*F_gt(:,:,1)+F_gt(:,:,2).*F_gt(:,:,2));
+            n_err   = length(find(F_val & E>tau(1) & E./F_mag>tau(2)));
+            n_total = length(find(F_val));
+            f_err = n_err/n_total;
+
+
+        function [E,F_gt_val] = flow_error_map (F_gt,F_est)
+            F_gt_du  = shiftdim(F_gt(:,:,1));
+            F_gt_dv  = shiftdim(F_gt(:,:,2));
+            F_gt_val = shiftdim(F_gt(:,:,3));
+
+            F_est_du = shiftdim(F_est(:,:,1));
+            F_est_dv = shiftdim(F_est(:,:,2));
+
+            E_du = F_gt_du-F_est_du;
+            E_dv = F_gt_dv-F_est_dv;
+            E    = sqrt(E_du.*E_du+E_dv.*E_dv);
+            E(F_gt_val==0) = 0;
+        """
+        
+        # input flow is shape (BxHgtxWgt,2)
+        dist = torch.norm(target_flow - input_flow, p=2, dim=1)
+        gt_magnitude = torch.norm(target_flow, p=2, dim=1)
+        # dist is shape BxHgtxWgt
+        n_err = dist.gt(self.tau[0]) & (dist/gt_magnitude).gt(self.tau[1])
+        f1_loss = n_err.sum()
+        return f1_loss
+
+    def forward(self, input_flow, target_flow):
+        f1_loss = self.f1_kitti_2015(input_flow, target_flow)
+
+        return f1_loss

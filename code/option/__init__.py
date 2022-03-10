@@ -8,7 +8,7 @@ parser.add_argument('--template', default='CDVD_TSP',
                     help='You can set various templates in options.py')
 
 # Hardware specifications
-parser.add_argument('--n_threads', type=int, default=4,
+parser.add_argument('--n_threads', type=int, default=8,
                     help='number of threads for data loading')
 parser.add_argument('--cpu', action='store_true',
                     help='use cpu only')
@@ -53,6 +53,11 @@ parser.add_argument('--pre_train', type=Path, default=None,
                     help='pre-trained model file')
 parser.add_argument('--flow_pre_train', type=Path, default='network-default.pytorch',
                     help='flow pre-trained model file')
+parser.add_argument('--skip_load_flow_net', action='store_true',
+                    help='Do not load the flow not pre-trained model file')
+parser.add_argument('--original_model', action='store_true',
+                    help='Use original recons_video model')
+
 
 # Training specifications
 parser.add_argument('--test_every', type=int, default=1000,
@@ -87,9 +92,13 @@ parser.add_argument('--separate_loss', action='store_true',
 # Optimization specifications
 parser.add_argument('--loss', type=str, default='1*L1',
                     help='loss function configuration')
-parser.add_argument('--lr', type=float, default=1e-4,
+parser.add_argument('--lr', type=float, default=2e-7,
                     help='Sets Learning Rate')
-parser.add_argument('--max_lr', type=float, default=1e-4,
+parser.add_argument('--max_lr', type=float, default=7e-5,
+                    help='Sets maximum Learning Rate for LRFinder, OneCycleLR, and CyclicLr')
+parser.add_argument('--FlowNet_lr', type=float, default=5e-7,
+                    help='Sets Learning Rate')
+parser.add_argument('--FlowNet_max_lr', type=float, default=5e-5,
                     help='Sets maximum Learning Rate for LRFinder and OneCycleLR')
 parser.add_argument('--lr_decay', type=int, default=200,
                     help='learning rate decay per N epochs')
@@ -107,6 +116,12 @@ parser.add_argument('--AdamW_weight_decay', type=float, default=1e-2,
                     help='weight decay')
 parser.add_argument('--mid_loss_weight', type=float, default=1.,
                     help='the weight of mid loss in trainer')
+parser.add_argument('--step_size_up', type=int, default=2000,
+                    help='Number of training iterations in the increasing half of a cycle. Default: 2000')
+parser.add_argument('--CyclicLR_gamma', type=float, default=0.994,
+                    help='learning rate decay factor for step decay')
+parser.add_argument('--CyclicLR_mode', type=str, default='exp_range',
+                    help='learning rate policy one of {triangular, triangular2, exp_range}.')
 
 # Log specifications
 parser.add_argument('--experiment_dir', type=Path, default='../experiment/',

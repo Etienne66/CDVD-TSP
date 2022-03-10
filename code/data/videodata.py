@@ -154,7 +154,7 @@ class VIDEODATA(data.Dataset):
                 new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
                 input, gt = input[:new_h, :new_w, :], gt[:new_h, :new_w, :]
 
-            if not self.args.no_augment and not self.args.no_patch:
+            if not self.args.no_augment:
                 input, gt = utils.data_augment(input, gt)
         else:
             h, w, c = input.shape
@@ -171,7 +171,7 @@ class VIDEODATA(data.Dataset):
                 new_h, new_w = h - h % size_must_mode, w - w % size_must_mode
                 input, gt = input[:, :new_h, :new_w, :], gt[:, :new_h, :new_w, :]
 
-            if not self.args.no_augment and not self.args.no_patch:
+            if not self.args.no_augment:
                 input, gt = utils.data_augment_frames(input, gt)
         else:
             _, h, w, c = input.shape

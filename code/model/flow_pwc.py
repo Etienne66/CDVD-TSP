@@ -26,16 +26,17 @@ class Flow_PWC(nn.Module):
     """
     def __init__(self,
                  load_pretrain  = False,
-                 pretrain_fn    = '',
+                 pretrain_fn    = None,
                  device         = 'cuda',
                  use_checkpoint = False):
         super(Flow_PWC, self).__init__()
         self.device = device
         self.use_checkpoint = use_checkpoint
-        self.moduleNetwork = Network(device=self.device, use_checkpoint = self.use_checkpoint)
+        self.load_pretrain = load_pretrain
+        self.moduleNetwork = Network(device=device, use_checkpoint=use_checkpoint, load_pretrain=load_pretrain)
         print("Creating Flow PWC")
 
-        if load_pretrain:
+        if load_pretrain and pretrain_fn is not None and pretrain_fn.exists():
             self.moduleNetwork.load_state_dict(torch.load(pretrain_fn))
             print('Loading Flow PWC pretrain model from {}'.format(pretrain_fn))
 
@@ -45,25 +46,31 @@ class Flow_PWC(nn.Module):
         #print("tensorFirst.size(): ", tensorFirst.size())
         b, c, intHeight, intWidth = tensorFirst.size()
 
+        # Need input image resolution to always be a multiple of 64
         intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
         intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
 
-        tensorPreprocessedFirst = torch.nn.functional.interpolate(input         = tensorFirst,
-                                                                  size          = (intPreprocessedHeight,
-                                                                                   intPreprocessedWidth),
-                                                                  mode          = 'bilinear',
-                                                                  align_corners = False)
-        tensorPreprocessedSecond = torch.nn.functional.interpolate(input         = tensorSecond,
-                                                                   size          = (intPreprocessedHeight,
-                                                                                    intPreprocessedWidth),
-                                                                   mode          = 'bilinear',
-                                                                   align_corners = False)
+        if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
+            # Faster but same memory utilization. Without detach it is slower but takes less memory.
+            tensorPreprocessedFirst = tensorFirst.detach()
+            tensorPreprocessedSecond = tensorSecond.detach()
+        else:
+            tensorPreprocessedFirst = torch.nn.functional.interpolate(
+                                        input         = tensorFirst,
+                                        size          = (intPreprocessedHeight, intPreprocessedWidth),
+                                        mode          = 'bilinear',
+                                        align_corners = False)
+            tensorPreprocessedSecond = torch.nn.functional.interpolate(
+                                        input         = tensorSecond,
+                                        size          = (intPreprocessedHeight, intPreprocessedWidth),
+                                        mode          = 'bilinear',
+                                        align_corners = False)
 
         tensorFlow = torch.nn.functional.interpolate(input         = self.moduleNetwork(tensorPreprocessedFirst,
                                                                                         tensorPreprocessedSecond),
-                                                     size          = (intHeight, intWidth),
-                                                     mode          = 'bilinear',
-                                                     align_corners = False)
+                        size          = (intHeight, intWidth),
+                        mode          = 'bilinear',
+                        align_corners = False)
 
         tensorFlow[:, 0, :, :] *= 20.0 * float(intWidth) / float(intPreprocessedWidth)
         tensorFlow[:, 1, :, :] *= 20.0 * float(intHeight) / float(intPreprocessedHeight)
@@ -145,10 +152,10 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                                 1,
                                                 1,
                                                 -1
-                                               ).expand(-1,
-                                                        -1,
+                                               ).repeat(1,
+                                                        1,
                                                         tensorFlow.shape[2],
-                                                        -1)
+                                                        1)
         tensorVertical = torch.linspace(-1.0  + (1.0 / tensorFlow.shape[2]),
                                         1.0 - (1.0 / tensorFlow.shape[2]),
                                         tensorFlow.shape[2],
@@ -157,9 +164,9 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                               1,
                                               -1,
                                               1
-                                             ).expand(-1,
-                                                      -1,
-                                                      -1,
+                                             ).repeat(1,
+                                                      1,
+                                                      1,
                                                       tensorFlow.shape[3])
         #Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1).to(device)
         Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1)
@@ -179,8 +186,8 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                                    mode='bilinear',
                                                    padding_mode='zeros',
                                                    align_corners=False)
-    tensorMask = tensorOutput[:, -1:, :, :];
-    tensorMask[tensorMask > 0.999] = 1.0;
+    tensorMask = tensorOutput[:, -1:, :, :]
+    tensorMask[tensorMask > 0.999] = 1.0
     tensorMask[tensorMask < 1.0] = 0.0
 
     return tensorOutput[:, :-1, :, :] * tensorMask
@@ -189,21 +196,15 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
 ##########################################################
 
 
-class _Extractor(torch.nn.Module):
+class Extractor(torch.nn.Module):
     """The feature pyramid extractor network. The first image (t = 1) and the second image (t =2) are encoded using the same
     Siamese network. Each convolution is followed by a leaky ReLU unit. The convolutional layer and the ×2 downsampling layer at
     each level is implemented using a single convolutional layer with a stride of 2. c denotes extracted features of image t at
     level l
     """
-    def __init__(self):
-        super(_Extractor, self).__init__()
-        self.original_model = False
-        if self.original_model:
-            #This matches the original code that seems to have a typo
-            moduleSixChannels = 196
-        else:
-            #This matches the original paper
-            moduleSixChannels = 192
+    def __init__(self,
+                 load_pretrain = False):
+        super(Extractor, self).__init__()
 
         self.moduleOne = torch.nn.Sequential(
             torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=1),
@@ -250,6 +251,15 @@ class _Extractor(torch.nn.Module):
             torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
         )
 
+        # Corrected channels to be 192 because 196 is not a multiple of 32. 196 appears to have been a typo.
+        # Will update model after pretrained model is loaded.
+        if load_pretrain:
+        #if True:
+            moduleSixChannels = 196
+        else:
+            moduleSixChannels = 192
+            print('flow_net.moduleNetwork.moduleExtractor.moduleSix loaded with 192 channels ')
+            
         self.moduleSix = torch.nn.Sequential(
             torch.nn.Conv2d(in_channels=128, out_channels=moduleSixChannels, kernel_size=3, stride=2, padding=1),
             torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
@@ -268,18 +278,19 @@ class _Extractor(torch.nn.Module):
         tensorFiv = self.moduleFiv(tensorFou)
         tensorSix = self.moduleSix(tensorFiv)
 
+        # Removed tensorOne from return because it wasn't used and isn't a multiple of 32
         return [tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
     # end
 # end
 
-class _Decoder(torch.nn.Module):
+class Decoder(torch.nn.Module):
     """The optical flow estimator network. Each convolutional layer is followed by a leaky ReLU unit except the last one that
     outputs the optical flow.
     """
     def __init__(self,
                  intLevel,
-                 device         = 'cuda',):
-        super(_Decoder, self).__init__()
+                 device         = 'cuda'):
+        super(Decoder, self).__init__()
         self.device=device
 
         intPrevious = [None,
@@ -310,7 +321,7 @@ class _Decoder(torch.nn.Module):
                                                          kernel_size  = 4,
                                                          stride       = 2,
                                                          padding      = 1)
-            # Start with inLevel 6(None), 5(20/32), 4(20/16), 3(20/8) and finally 2(20/4).
+            # Start with inLevel 6(None), 5(20/32=0.625), 4(20/16=1.25), 3(20/8=2.5) and finally 2(20/4=5.0)
             # 6 doesn't have an objectPrevious so doesn't need a value. 2 is the last.
             self.dblBackwarp = [None, None, None, 5.0, 2.5, 1.25, 0.625, None][intLevel + 1]
 
@@ -417,12 +428,12 @@ class _Decoder(torch.nn.Module):
     # end
 # end
 
-class _Refiner(torch.nn.Module):
+class Refiner(torch.nn.Module):
     """The context network. Each convolutional layer is followed by a leaky ReLU unit except the last one that outputs the
     optical flow. The last number in each convolutional layer denotes the dilation constant.
     """
     def __init__(self):
-        super(_Refiner, self).__init__()
+        super(Refiner, self).__init__()
 
         self.moduleMain = torch.nn.Sequential(
             torch.nn.Conv2d(in_channels  = 81 + 32 + 2 + 2 + 128 + 128 + 96 + 64 + 32,
@@ -459,19 +470,21 @@ class Network(torch.nn.Module):
     """
     def __init__(self,
                  device = 'cuda',
-                 use_checkpoint = False):
+                 use_checkpoint = False,
+                 load_pretrain = False):
         super(Network, self).__init__()
         self.use_checkpoint = use_checkpoint
+        self.device = device
 
-        self.moduleExtractor = _Extractor()
+        self.moduleExtractor = Extractor(load_pretrain=load_pretrain)
 
-        self.moduleTwo = _Decoder(2, device=device)
-        self.moduleThr = _Decoder(3, device=device)
-        self.moduleFou = _Decoder(4, device=device)
-        self.moduleFiv = _Decoder(5, device=device)
-        self.moduleSix = _Decoder(6, device=device)
+        self.moduleTwo = Decoder(2, device=device)
+        self.moduleThr = Decoder(3, device=device)
+        self.moduleFou = Decoder(4, device=device)
+        self.moduleFiv = Decoder(5, device=device)
+        self.moduleSix = Decoder(6, device=device)
 
-        self.moduleRefiner = _Refiner()
+        self.moduleRefiner = Refiner()
 
         #self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey,
         #                      tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/github/pytorch-pwc/network-'
@@ -501,7 +514,7 @@ class Network(torch.nn.Module):
             #       passed as is, the output of Checkpoint will be variable which don't require grad and autograd tape will
             #       break there. To get around, you can pass a dummy input which requires grad but isn't necessarily used in
             #       computation.
-            dummy_tensor = torch.zeros(1, requires_grad=True)
+            dummy_tensor = torch.zeros(1, device=self.device, requires_grad=True)
             
             tensorFirst  = checkpoint.checkpoint(self.custom(self.moduleExtractor),
                                                  tensorFirst,

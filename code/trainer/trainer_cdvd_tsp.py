@@ -2,6 +2,7 @@
 import decimal
 import torch
 import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
 from tqdm import tqdm
 from utils import utils
 from loss import ssim
@@ -19,6 +20,47 @@ class Trainer_CDVD_TSP(Trainer):
                 args.n_sequence)
     # end___init__
 
+
+    def make_optimizer(self):
+        print("Used custom AdamW")
+        kwargs = {'lr':           self.args.lr,
+                  'weight_decay': self.args.AdamW_weight_decay}
+        return optim.AdamW([{"params": self.model.get_model().recons_net.parameters()},
+                            {"params": self.model.get_model().flow_net.parameters()}],
+        #return optim.AdamW([{"params": self.model.get_model().recons_net.parameters()},
+        #                    {"params": self.model.get_model().flow_net.parameters(), "lr": 1e-10}],
+        #return optim.AdamW([{"params": self.model.get_model().flow_net.parameters()},
+        #                    {"params": self.model.get_model().recons_net.parameters(), "lr": 1e-10}],
+                          **kwargs)
+
+    def make_scheduler(self):
+        print("Used custom scheduler")
+        clr_fn = lambda x: self.args.CyclicLR_gamma**x
+        #self.args.step_size_up = int(len(self.loader_train.dataset) * 1.25)
+        kwargs = {'base_lr':        [self.args.lr, self.args.FlowNet_lr],
+                  'max_lr':         [self.args.max_lr, self.args.FlowNet_max_lr],
+        #kwargs = {'base_lr':        [self.args.lr, self.args.lr],
+        #          'max_lr':         [self.args.max_lr, self.args.max_lr],
+        #kwargs = {'base_lr':        self.args.lr,
+        #          'max_lr':         self.args.max_lr,
+                  'cycle_momentum': False, #needs to be False for Adam/AdamW
+                  'step_size_up':   self.args.step_size_up,
+                  'mode':           self.args.CyclicLR_mode,
+                  'gamma':          self.args.CyclicLR_gamma
+                  #'scale_fn':       clr_fn
+                  }
+        return lr_scheduler.CyclicLR(self.optimizer, **kwargs)
+
+        
+    def timedelta_format(self, deltatime):
+        if str(deltatime).find('.') > 0:
+            result = str(deltatime).split('.', 2)[0] + '.' + str(deltatime).split('.', 2)[1][:2]
+        else:
+            result = str(deltatime)
+        
+        return result
+
+    
     def loss_backward(self, loss, lr, lr_array, loss_array, batch, stages):
         if self.args.plot_running_average:
             if len(loss_array) <= batch:
@@ -113,8 +155,9 @@ class Trainer_CDVD_TSP(Trainer):
         stages = self.args.n_sequence // 2
         number_of_batches = len(self.loader_train)
         start_time = train_start_time
-        total_preprocess_time = total_forward_time = total_loss_time = total_backward_time = timedelta(days=0)
-        total_optimizer_time = total_scheduler_time = total_time = total_postprocess_time = timedelta(days=0)
+        total_preprocess_time = total_forward_time = total_loss_time = timedelta(days=0)
+        total_backward_time = total_optimizer_time = total_scheduler_time = total_time = timedelta(days=0)
+        total_postprocess_time = timedelta(days=0)
         if self.args.plot_running_average:
         # Setup arrays to be used for plots
             loss_array = np.zeros((1,stages))
@@ -123,23 +166,25 @@ class Trainer_CDVD_TSP(Trainer):
             tqdm_train = tqdm(self.loader_train, position=0)
             for batch, (input, gt, filenames) in enumerate(tqdm_train):
                 lr = self.scheduler.get_last_lr()[0]
-                self.ckp.report_log(float(lr), type='LR')
-                input_gpu = input.to(device=self.device, memory_format=torch.contiguous_format)
+                if self.args.OneCycleLR or self.args.StepLR:
+                    self.ckp.report_log(float(lr), type='LR')
+                input = input.to(device=self.device)
+                gt = gt.to(device=self.device)
                 if self.args.n_sequence == 3:
-                    gt_cat = torch.cat([gt[:, 1, :, :, :]], dim=1).to(device=self.device, memory_format=torch.contiguous_format)
+                    gt = torch.cat([gt[:, 1, :, :, :]], dim=1).to(device=self.device)
                 elif self.args.n_sequence == 5:
-                    gt_cat = torch.cat([gt[:, 1, :, :, :], gt[:, 2, :, :, :], gt[:, 3, :, :, :],
-                                        gt[:, 2, :, :, :]], dim=1).to(device=self.device, memory_format=torch.contiguous_format)
+                    gt = torch.cat([gt[:, 1, :, :, :], gt[:, 2, :, :, :], gt[:, 3, :, :, :],
+                                    gt[:, 2, :, :, :]], dim=1).to(device=self.device)
                 elif self.args.n_sequence == 7:
-                    gt_cat = torch.cat([gt[:, 1, :, :, :], gt[:, 2, :, :, :], gt[:, 3, :, :, :], gt[:, 4, :, :, :], gt[:, 5, :, :, :],
-                                        gt[:, 2, :, :, :], gt[:, 3, :, :, :], gt[:, 4, :, :, :],
-                                        gt[:, 3, :, :, :]], dim=1).to(device=self.device, memory_format=torch.contiguous_format)
+                    gt = torch.cat([gt[:, 1, :, :, :], gt[:, 2, :, :, :], gt[:, 3, :, :, :], gt[:, 4, :, :, :], gt[:, 5, :, :, :],
+                                    gt[:, 2, :, :, :], gt[:, 3, :, :, :], gt[:, 4, :, :, :],
+                                    gt[:, 3, :, :, :]], dim=1).to(device=self.device)
                 preprocess_time = datetime.now()
                 self.optimizer.zero_grad()
                 with torch.set_grad_enabled(True):
-                    output_cat = self.model(input_gpu)
+                    output_cat = self.model(input)
                     forward_time = datetime.now()
-                    loss = self.loss(output_cat, gt_cat)
+                    loss = self.loss(output_cat, gt)
                     loss_time = datetime.now()
                     if self.args.plot_running_average:
                         lr_array, loss_array = self.loss_backward(loss, lr, lr_array, loss_array, batch, stages)
@@ -167,7 +212,6 @@ class Trainer_CDVD_TSP(Trainer):
                         frames_total,
                         decimal.Decimal(lr)))
                 if (self.args.plot_running_average
-                    #and batch > 0
                     and (   (batch + 1) % self.args.running_average == 0
                          or batch + 1 == len(self.loader_train))
                     ):
@@ -187,26 +231,27 @@ class Trainer_CDVD_TSP(Trainer):
                 total_backward_time += backward_time - loss_time
                 total_optimizer_time += optimizer_time - backward_time
                 total_scheduler_time += scheduler_time - optimizer_time
-                total_time += scheduler_time - start_time
                 total_postprocess_time += postprocess_time - scheduler_time
-                start_time = datetime.now()
+                total_time += postprocess_time - start_time
+                start_time = postprocess_time
 
             tqdm_train.close()
         for stage in range(stages):
             self.ckp.write_log('\t[Stage {}][Loss: {}]'.format(stage + 1,
                                                                self.loss.display_loss_stage(batch, stage)))
-        self.ckp.write_log('\t[Average][Loss: {}]'.format(self.loss.display_loss(batch)))
+        if stages > 1:
+            self.ckp.write_log('\t[Average][Loss: {}]'.format(self.loss.display_loss(batch)))
         self.ckp.write_log('\t[Preprocess: {}][Forward: {}][Loss: {}][Backward: {}]'.format(
-            total_preprocess_time,
-            total_forward_time,
-            total_loss_time,
-            total_backward_time))
+            self.timedelta_format(total_preprocess_time),
+            self.timedelta_format(total_forward_time),
+            self.timedelta_format(total_loss_time),
+            self.timedelta_format(total_backward_time)))
         iterations_per_second = total_time/len(self.loader_train)
-        self.ckp.write_log('\t[Optimizer: {}][Scheduler: {}][Post: {}]\t[Total: {}][{:.6f}s/it]'.format(
-            total_optimizer_time,
-            total_scheduler_time,
-            total_postprocess_time,
-            total_time,
+        self.ckp.write_log('\t[Optimizer: {}][Scheduler: {}][Post: {}]\t\t[Total: {}][{:.6f}s/it]'.format(
+            self.timedelta_format(total_optimizer_time),
+            self.timedelta_format(total_scheduler_time),
+            self.timedelta_format(total_postprocess_time),
+            self.timedelta_format(total_time),
             iterations_per_second.total_seconds()))
 
         self.loss.end_log(len(self.loader_train))
@@ -281,8 +326,8 @@ class Trainer_CDVD_TSP(Trainer):
                     #    torch.cuda.empty_cache()
                     SSIM = []
                     PSNR = []
-                    input_gpu = input.to(device=self.device, memory_format=torch.contiguous_format)
-                    gt = gt[:, self.args.n_sequence // 2, :, :, :].to(device=self.device, memory_format=torch.contiguous_format)
+                    input_gpu = input.to(device=self.device)
+                    gt = gt[:, self.args.n_sequence // 2, :, :, :].to(device=self.device)
                     preprocess_time = datetime.now()
                     output_cat = self.model(input_gpu)
                     forward_time = datetime.now()
@@ -339,10 +384,11 @@ class Trainer_CDVD_TSP(Trainer):
                 # end for
 
 
-                # If using StepLR as the scheduler it needs to take a step after testing.
-                if self.args.StepLR:
-                    self.scheduler.step()
                 tqdm_test.close()
+
+            # If using StepLR as the scheduler it needs to take a step after testing.
+            if self.args.StepLR:
+                self.scheduler.step()
 
             self.ckp.end_log(len(self.loader_test), type='PSNR')
             self.ckp.end_log(len(self.loader_test), type='SSIM')
@@ -362,12 +408,12 @@ class Trainer_CDVD_TSP(Trainer):
             self.args.epochs_completed += 1
             self.args.total_test_time += datetime.now() - test_start_time
             self.ckp.write_log('\t[Preprocess: {}][Forward: {}][Postprocess: {}]'.format(
-                total_preprocess_time,
-                total_forward_time,
-                total_postprocess_time))
+                self.timedelta_format(total_preprocess_time),
+                self.timedelta_format(total_forward_time),
+                self.timedelta_format(total_postprocess_time)))
             iterations_per_second = total_time/len(self.loader_test)
             self.ckp.write_log('\t\t[Total: {}][{:.6f}s/it]'.format(
-                total_time,
+                self.timedelta_format(total_time),
                 iterations_per_second.total_seconds()))
 
             if not self.args.test_only:
