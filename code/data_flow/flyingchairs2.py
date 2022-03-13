@@ -71,12 +71,11 @@ def flying_chairs2(root,
                    transform=None,
                    target_transform=None,
                    co_transform=None,
-                   train=True,
-                   lr_finder=False):
+                   train=True):
     # Image size(512x384)
     train_list = make_dataset(root, train=train)
     train_dataset = ListDataset(root, train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=Chairs_flow_loader, mask=True, lr_finder=False)
+                                loader=Chairs_flow_loader, mask=True)
 
     return train_dataset

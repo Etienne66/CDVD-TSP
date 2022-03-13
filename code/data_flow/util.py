@@ -31,8 +31,6 @@ def write_flow_png(filename, uv, v=None, mask=None):
         u = uv
         #v = v.astype(np.float64)
 
-    #print(u.dtype)
-    #print(v.dtype)
     assert (u.shape == v.shape)
 
     height_img, width_img = u.shape
@@ -43,17 +41,9 @@ def write_flow_png(filename, uv, v=None, mask=None):
     # range(-512, 512) -> range(0.0, 65535.0)
     flow_u = np.clip((u * 64 + 2 ** 15), 0.0, 65535.0).astype(np.uint16)
     flow_v = np.clip((v * 64 + 2 ** 15), 0.0, 65535.0).astype(np.uint16)
-    #print(valid_mask.shape)
-    #print(flow_u.shape)
-    #print(flow_v.shape)
     
     #Because OpenCV uses BGR instead of RGB so the layers must be switched
     output = np.stack((valid_mask, flow_v, flow_u), axis=-1)
-    #output = np.stack((valid_mask, flow_u, flow_v), axis=-1)
-    #output = np.stack((flow_u, flow_v, valid_mask), axis=-1)
-    #output = np.stack((flow_u, flow_v, valid_mask))
-    #print(output.shape)
-    #output = np.reshape(output, (-1, width_img*3))
 
     """ OpenCV defaults to PNG compression level 1
     https://machinelearningknowledge.ai/tips-and-tricks-of-opencv-cv2-imwrite-that-nobody-told-you/#Managing_PNG_Image_Compression_in_cv2_imwrite

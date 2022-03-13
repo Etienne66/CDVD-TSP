@@ -33,8 +33,7 @@ class ListDataset(data.Dataset):
                  co_transform=None,
                  loader=default_loader,
                  mask=False,
-                 size=False,
-                 lr_finder=False):
+                 size=False):
         """
 
         :param root: directory containing the dataset images
@@ -61,7 +60,6 @@ class ListDataset(data.Dataset):
         self.loader = loader
         self.mask = mask
         self.size = size
-        self.lr_finder = lr_finder
 
     def __getitem__(self, index):
         inputs, target = self.path_list[index]
@@ -72,18 +70,18 @@ class ListDataset(data.Dataset):
             inputs, target = self.loader(self.root, inputs, target)
             mask = get_gt_correspondence_mask(target)
 
-        target = np.concatenate((target, mask[:,:,None]), axis=2)
         
         if self.co_transform is not None:
-            #inputs, target, mask = self.co_transform(inputs, target, mask)
-            inputs, target = self.co_transform(inputs, target)
+            inputs, target, mask = self.co_transform(inputs, target, mask)
+            #inputs, target = self.co_transform(inputs, target)
         if self.transform is not None:
             inputs[0] = self.transform(inputs[0])
             inputs[1] = self.transform(inputs[1])
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        #mask = mask.astype(np.bool) if LooseVersion(torch.__version__) >= LooseVersion('1.3') else mask.astype(np.float32)
+        mask = mask.astype(np.bool) if LooseVersion(torch.__version__) >= LooseVersion('1.3') else mask.astype(np.uint8)
+        target = np.concatenate((target, mask[None,:,:]), axis=0)
         inputs = torch.stack(inputs)
         
         return inputs, target

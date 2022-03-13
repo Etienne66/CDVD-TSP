@@ -284,8 +284,6 @@ class Fl_KITTI_2015(nn.Module):
         Args:
             input_flow: estimated flow [BxHxW,2]
             target_flow: ground-truth flow [BxHxW,2]
-            alpha: threshold
-            img_size: image size
         Output:
             PCK metric
         """
@@ -309,12 +307,12 @@ class Fl_KITTI_2015(nn.Module):
         # dist is shape BxHgtxWgt
         n_err = dist.gt(self.tau[0]) & (dist/gt_magnitude).gt(self.tau[1])
         if self.use_mask:
-            f1_loss = n_err.sum()/torch.sum(mask)
+            fl_loss = n_err.sum()/torch.sum(mask)
         else:
-            f1_loss = n_err.sum()
-        return f1_loss
+            fl_loss = n_err.sum()
+        return fl_loss
 
     def forward(self, input_flow, target_flow, mask=None):
-        f1_loss = self.fl_kitti_2015(input_flow, target_flow, mask)
+        fl_loss = self.fl_kitti_2015(input_flow, target_flow, mask)
 
-        return f1_loss
+        return fl_loss

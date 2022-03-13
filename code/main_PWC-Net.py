@@ -199,9 +199,6 @@ def main():
 
 
     # Data loading code
-    validate_transform = flow_transforms.Compose([
-        flow_transforms.CenterCrop((320,768))
-    ])
     # tranforms.normalize output[channel] = (input[channel] - mean[channel]) / std[channel]
     # All channels are RGB. Loads from OpenCV were corrected
     if args.normalize:
@@ -235,6 +232,10 @@ def main():
     target_transform = transforms.Compose([
         flow_transforms.ArrayToTensor()#,
         #transforms.Normalize(mean=[0,0],std=[args.div_flow,args.div_flow])
+    ])
+
+    validate_transform = flow_transforms.Compose([
+        flow_transforms.CenterCrop((320,768))
     ])
 
     co_transform = flow_transforms.Compose([

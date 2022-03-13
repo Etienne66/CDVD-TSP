@@ -186,9 +186,7 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                                    mode='bilinear',
                                                    padding_mode='zeros',
                                                    align_corners=False)
-    tensorMask = tensorOutput[:, -1:, :, :]
-    tensorMask[tensorMask > 0.999] = 1.0
-    tensorMask[tensorMask < 1.0] = 0.0
+    tensorMask = tensorOutput[:, -1:, :, :]; tensorMask[tensorMask > 0.999] = 1.0; tensorMask[tensorMask < 1.0] = 0.0
 
     return tensorOutput[:, :-1, :, :] * tensorMask
 # end

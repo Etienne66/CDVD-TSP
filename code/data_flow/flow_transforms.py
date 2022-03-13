@@ -74,6 +74,7 @@ class CenterCrop(object):
             self.size = size
 
     def __call__(self, inputs, target, mask=None):
+        mask_flag = False if mask is None else True
         if target.shape[2]==3:
             mask = target[:,:,2]
             target = target[:,:,:2]
@@ -91,8 +92,11 @@ class CenterCrop(object):
         inputs[1] = inputs[1][y2: y2 + th, x2: x2 + tw]
         target = target[y1: y1 + th, x1: x1 + tw]
         mask = mask[y1: y1 + th, x1: x1 + tw]
-        target = np.concatenate((target, mask[:,:,None]), axis=2)
-        return inputs, target
+        if mask_flag:
+            return inputs,target,mask
+        else:
+            target = np.concatenate((target, mask[:,:,None]), axis=2)
+            return inputs,target
 
 
 class Scale(object):
@@ -138,6 +142,7 @@ class RandomCrop(object):
             self.size = size
 
     def __call__(self, inputs, target, mask=None):
+        mask_flag = False if mask is None else True
         if target.shape[2]==3:
             mask = target[:,:,2]
             target = target[:,:,:2]
@@ -154,8 +159,11 @@ class RandomCrop(object):
         inputs[1] = inputs[1][y1: y1 + th,x1: x1 + tw]
         target = target[y1: y1 + th,x1: x1 + tw]
         mask = mask[y1: y1 + th,x1: x1 + tw]
-        target = np.concatenate((target, mask[:,:,None]), axis=2)
-        return inputs,target
+        if mask_flag:
+            return inputs,target,mask
+        else:
+            target = np.concatenate((target, mask[:,:,None]), axis=2)
+            return inputs,target
 
 
 class RandomHorizontalFlip(object):
@@ -163,6 +171,7 @@ class RandomHorizontalFlip(object):
     """
 
     def __call__(self, inputs, target, mask=None):
+        mask_flag = False if mask is None else True
         if target.shape[2]==3:
             mask = target[:,:,2]
             target = target[:,:,:2]
@@ -174,15 +183,19 @@ class RandomHorizontalFlip(object):
             target = np.copy(np.fliplr(target))
             target[:,:,0] *= -1
             mask = np.copy(np.fliplr(mask))
-        target = np.concatenate((target, mask[:,:,None]), axis=2)
-        return inputs,target
-
+        if mask_flag:
+            return inputs,target,mask
+        else:
+            target = np.concatenate((target, mask[:,:,None]), axis=2)
+            return inputs,target
+        
 
 class RandomVerticalFlip(object):
     """Randomly horizontally flips the given PIL.Image with a probability of 0.5
     """
 
     def __call__(self, inputs, target, mask=None):
+        mask_flag = False if mask is None else True
         if target.shape[2]==3:
             mask = target[:,:,2]
             target = target[:,:,:2]
@@ -194,8 +207,11 @@ class RandomVerticalFlip(object):
             target = np.copy(np.flipud(target))
             target[:,:,1] *= -1
             mask = np.copy(np.flipud(mask))
-        target = np.concatenate((target, mask[:,:,None]), axis=2)
-        return inputs,target
+        if mask_flag:
+            return inputs,target,mask
+        else:
+            target = np.concatenate((target, mask[:,:,None]), axis=2)
+            return inputs,target
 
 
 class RandomRot90(object):
