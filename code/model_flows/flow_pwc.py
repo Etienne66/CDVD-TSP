@@ -498,10 +498,14 @@ class Network(torch.nn.Module):
     """
     def __init__(self,
                  device = 'cuda',
-                 use_checkpoint = False):
+                 use_checkpoint = False,
+                 lr_finder=False,
+                 div_flow=20):
         super(Network, self).__init__()
         self.use_checkpoint = use_checkpoint
         self.device = device
+        self.lr_finder = lr_finder
+        self.div_flow = div_flow
 
         self.moduleExtractor = Extractor()
 
@@ -533,9 +537,9 @@ class Network(torch.nn.Module):
         return custom_forward
     # end_custom
 
-    def forward(self, tensorFirst, tensorSecond):
-        #print('tensorFirst size', tensorFirst.size())
-        #print('tensorSecond size', tensorSecond.size())
+    def forward(self, x):
+        tensorFirst = x[:,0,:,:,:]
+        tensorSecond = x[:,1,:,:,:]
         if self.use_checkpoint and self.training:
             # Using a dummy tensor to avoid the error:
             #       UserWarning: None of the inputs have requires_grad=True. Gradients will be None
@@ -592,21 +596,34 @@ class Network(torch.nn.Module):
             objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
 
             objectEstimate['tensorFeat'] = self.moduleRefiner(objectEstimate['tensorFeat'])
+        objectEstimate = (objectEstimate['tensorFlow'] + objectEstimate['tensorFeat'])
+        #print()
+        #print('type objectEstimate: ',type(objectEstimate))
 
-        return (objectEstimate['tensorFlow'] + objectEstimate['tensorFeat'])
+        if self.lr_finder:
+            # Image is 0.25 of the original size
+            b, n, c, intHeight, intWidth = x.size()
+            objectEstimate = torch.nn.functional.interpolate(
+                                input         = objectEstimate,
+                                size          = (intHeight, intWidth),
+                                mode          = 'bilinear',
+                                align_corners = False)
+            objectEstimate *= self.div_flow
+            
+        return objectEstimate
     # end_forward
 # end_Network
 
 
-def flow_pwc(data=None, device='cuda', use_checkpoint=False):
+def flow_pwc(data=None, device='cuda', use_checkpoint=False, lr_finder=False, div_flow=20):
     """FlowNetS model architecture from the
     "Learning Optical Flow with Convolutional Networks" paper (https://arxiv.org/abs/1504.06852)
     Args:
         data : pretrained weights of the network. will create a new one if not set
     """
-    #model = Flow_PWC(device='cuda', use_checkpoint=False)
-    moduleNetwork = Network(device=device, use_checkpoint=use_checkpoint)
+    moduleNetwork = Network(device=device, use_checkpoint=use_checkpoint, lr_finder=lr_finder, div_flow=div_flow)
     if data is not None:
-        moduleNetwork.load_state_dict(data['state_dict'])
+        if 'state_dict' in data.keys():
+            moduleNetwork.load_state_dict(data['state_dict'])
     return moduleNetwork
 

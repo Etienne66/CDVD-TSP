@@ -88,10 +88,12 @@ parser.add_argument('--original_loss', action='store_true',
                     help='Combine the losses of all stages the same as the original')
 parser.add_argument('--separate_loss', action='store_true',
                     help='Calculate losses during separate backward passes.')
+parser.add_argument('--loss', default='0.84*MSL+0.16*L1+2*HML', type=str,
+                    choices=['0.84*MSL+0.16*L1+2*HML','0.84*MSL+0.16*L1','1*L1+2*HEM'],
+                    help='Loss function. HEM = Hard Example Mining for L1; MSL = (1 - MS-SSIM); HML = Hard Example Mining for MSL')
+
 
 # Optimization specifications
-parser.add_argument('--loss', type=str, default='1*L1',
-                    help='loss function configuration')
 parser.add_argument('--lr', type=float, default=2e-7,
                     help='Sets Learning Rate')
 parser.add_argument('--max_lr', type=float, default=7e-5,

@@ -16,7 +16,6 @@ def get_gt_correspondence_mask(flow):
                        np.linspace(0, h - 1, h))
     map_x = (flow[:,:,0]+X).astype(np.float32)
     map_y = (flow[:,:,1]+Y).astype(np.float32)
-
     mask_x = np.logical_and(map_x>0, map_x< w)
     mask_y = np.logical_and(map_y>0, map_y< h)
     mask = np.logical_and(mask_x, mask_y).astype(np.uint8)
@@ -34,7 +33,8 @@ class ListDataset(data.Dataset):
                  co_transform=None,
                  loader=default_loader,
                  mask=False,
-                 size=False):
+                 size=False,
+                 lr_finder=False):
         """
 
         :param root: directory containing the dataset images
@@ -61,6 +61,7 @@ class ListDataset(data.Dataset):
         self.loader = loader
         self.mask = mask
         self.size = size
+        self.lr_finder = lr_finder
 
     def __getitem__(self, index):
         inputs, target = self.path_list[index]
@@ -70,17 +71,24 @@ class ListDataset(data.Dataset):
         else:
             inputs, target = self.loader(self.root, inputs, target)
             mask = get_gt_correspondence_mask(target)
+
+        target = np.concatenate((target, mask[:,:,None]), axis=2)
         
         if self.co_transform is not None:
-            inputs, target, mask = self.co_transform(inputs, target, mask)
+            #inputs, target, mask = self.co_transform(inputs, target, mask)
+            inputs, target = self.co_transform(inputs, target)
         if self.transform is not None:
             inputs[0] = self.transform(inputs[0])
             inputs[1] = self.transform(inputs[1])
-
         if self.target_transform is not None:
             target = self.target_transform(target)
-        mask = mask.astype(np.bool) if LooseVersion(torch.__version__) >= LooseVersion('1.3') else mask.astype(np.float32)
-        return inputs, target, mask
+
+        #mask = mask.astype(np.bool) if LooseVersion(torch.__version__) >= LooseVersion('1.3') else mask.astype(np.float32)
+        inputs = torch.stack(inputs)
+        
+        return inputs, target
+        #return inputs, target, mask
+
         """
         return {'from_images': inputs[0],
                 'to_images': inputs[1],

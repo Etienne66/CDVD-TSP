@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from loss.hard_example_mining import HEM, HEM_MSSIM_L1
+import utils.utils as utils
 from datetime import datetime
 import time
 from pathlib import Path
@@ -16,7 +17,7 @@ from loss.ssim import MS_SSIM
 import traceback
 
 class Loss(nn.modules.loss._Loss):
-    def __init__(self, args, ckp):
+    def __init__(self, args, ckp=None):
         super(Loss, self).__init__()
         print('Preparing loss function:')
 
@@ -43,19 +44,16 @@ class Loss(nn.modules.loss._Loss):
                                [5,6,7],
                                [8]]
 
-        if args.LossL1HEM:
-            loss_string = args.loss
-        elif args.LossMslL1:
-            loss_string = args.loss_MSL
-        else:
-            loss_string = args.loss_HEM_MSL
-
-        for loss in loss_string.split('+'):
+        for loss in args.loss.split('+'):
             weight, loss_type = loss.split('*')
             if loss_type == 'MSE':
                 loss_function = nn.MSELoss()
             elif loss_type == 'L1':
                 loss_function = nn.L1Loss()
+            elif loss_type == 'Fl':
+                loss_function = utils.Fl_KITTI_2015(use_mask=True)
+            elif loss_type == 'EPE':
+                loss_function = utils.EPE()
             elif loss_type == 'HEM':
                 loss_function = HEM(device=device)
             elif loss_type == 'MSL':
@@ -90,43 +88,70 @@ class Loss(nn.modules.loss._Loss):
 
         self.log = torch.Tensor()
 
-        self.loss_module.to(device=device, memory_format=torch.contiguous_format)
+        self.loss_module.to(device=device)
 
         if not args.cpu and args.n_GPUs > 1:
             self.loss_module = nn.DataParallel(
                 self.loss_module, range(args.n_GPUs)
             )
 
-        if args.load is not None:
+        if args.load is not None and ckp is not None:
             self.load(ckp.dir, cpu=args.cpu)
 
 
     def forward(self, sr, hr):
-        output_images = torch.chunk(sr, self.frames_per_stage, dim=1)
-        gt_images = torch.chunk(hr, self.frames_per_stage, dim=1)
-        loss_sum = []
-        for stage in range(self.stages):
+        #print('Started loss')
+        loss_EPE = 0
+        loss_Fl = 0
+        if sr.ndimension() == 5:
+            output_images = torch.chunk(sr, self.frames_per_stage, dim=1)
+            gt_images = torch.chunk(hr, self.frames_per_stage, dim=1)
+            loss_sum = []
+            for stage in range(self.stages):
+                losses = []
+                for i, l in enumerate(self.loss):
+                    if l['function'] is not None:
+                        loss = 0
+                        for n in self.stage_list[stage]:
+                            if l['type'] in ('MSL','PSL','SSL'):
+                                loss += 1 - l['function'](output_images[n], gt_images[n])
+                            else:
+                                loss += l['function'](output_images[n], gt_images[n])
+                        loss /= self.stage_average[stage]
+                        losses.append(l['weight'] * loss)
+                        if not self.lr_finder:
+                            self.log[-1, i, stage] += loss.detach().cpu().numpy()
+                    elif l['type'] == 'DIS':
+                        if not self.lr_finder:
+                            self.log[-1, i, stage] += self.loss[i - 1]['function'].loss
+                loss_sum.append(sum(losses))
+                if len(self.loss) > 1:
+                    if not self.lr_finder:
+                        self.log[-1, -1, stage] += loss_sum[stage].detach().cpu().numpy()
+        else:
             losses = []
             for i, l in enumerate(self.loss):
                 if l['function'] is not None:
-                    loss = 0
-                    for n in self.stage_list[stage]:
-                        if l['type'] == 'MSL':
-                            loss += 1 - l['function'](output_images[n], gt_images[n])
-                        else:
-                            loss += l['function'](output_images[n], gt_images[n])
-                    loss /= self.stage_average[stage]
+                    if l['type'] in ('MSL','PSL','SSL'):
+                        loss = 1 - l['function'](sr, hr)
+                    else:
+                        loss = l['function'](sr, hr)
+                        if l['type'] == 'EPE':
+                            loss_EPE += loss
+                        elif l['type'] == 'Fl':
+                            loss_Fl += loss
                     losses.append(l['weight'] * loss)
-                    if not self.lr_finder:
-                        self.log[-1, i, stage] += loss.detach().cpu().numpy()
-                elif l['type'] == 'DIS' and not self.lr_finder:
-                    self.log[-1, i, stage] += self.loss[i - 1]['function'].loss
-            loss_sum.append(sum(losses))
-            if len(self.loss) > 1 and not self.lr_finder:
-                self.log[-1, -1, stage] += loss_sum[stage].detach().cpu().numpy()
-        if self.lr_finder:
+                elif l['type'] == 'DIS':
+                    pass
+            loss_sum = sum(losses)
+        
+        #print('Finishing loss')
+        #print('losses', loss_sum, loss_EPE, loss_Fl)
+        if False:#self.lr_finder:
             loss_avg = sum(loss_sum)/len(loss_sum)
-            return loss_avg
+            return sum(loss_avg)
+        if not self.lr_finder and (loss_EPE > 0 or loss_Fl > 0):
+            return loss_sum, loss_EPE, loss_Fl
         else:
             return loss_sum
 
@@ -190,6 +215,7 @@ class Loss(nn.modules.loss._Loss):
             fig = plt.figure(figsize=(38.4,21.6))
             plt.rcParams.update({'font.size': 20})
             plt.title('Loss Functions (Training)')
+            #plt.ticklabel_format(axis="y",style="sci",scilimits=(0,0))
             MSSSIM = []
             for i, l in enumerate(self.loss):
                 for stage in range(self.stages):

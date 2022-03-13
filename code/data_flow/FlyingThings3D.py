@@ -78,11 +78,12 @@ def flying_things_clean(root,
                         transform=None,
                         target_transform=None,
                         co_transform=None,
-                        train=True):
+                        train=True,
+                        lr_finder=False):
     train_list = make_dataset(root, train=train, final=False)
     train_dataset = ListDataset(root, train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=Things_flow_loader, mask=True)
+                                loader=Things_flow_loader, mask=True, lr_finder=False)
 
     return train_dataset
 
@@ -91,11 +92,12 @@ def flying_things_final(root,
                         transform=None,
                         target_transform=None,
                         co_transform=None,
-                        train=True):
+                        train=True,
+                        lr_finder=False):
     train_list = make_dataset(root, train=train)
     train_dataset = ListDataset(root, train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=Things_flow_loader, mask=True)
+                                loader=Things_flow_loader, mask=True, lr_finder=False)
 
     return train_dataset
 
@@ -104,12 +106,13 @@ def flying_things_both(root,
                        transform=None,
                        target_transform=None,
                        co_transform=None,
-                       train=True):
+                       train=True,
+                       lr_finder=False):
     train_list = make_dataset(root, train=train)
     train_list2 = make_dataset(root, train=train, final=False)
     train_dataset = ListDataset(root, train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=Things_flow_loader, mask=True)
+                                loader=Things_flow_loader, mask=True, lr_finder=False)
 
     return train_dataset
 

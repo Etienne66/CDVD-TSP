@@ -8,6 +8,7 @@ from utils import utils
 from model import correlation
 import torch.utils.checkpoint as checkpoint
 
+from distutils.version import LooseVersion
 
 def make_model(args):
     """ This does not appear to be used """
@@ -183,8 +184,8 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
                                                    mode='bilinear',
                                                    padding_mode='zeros',
                                                    align_corners=False)
-    tensorMask = tensorOutput[:, -1:, :, :];
-    tensorMask[tensorMask > 0.999] = 1.0;
+    tensorMask = tensorOutput[:, -1:, :, :]
+    tensorMask[tensorMask > 0.999] = 1.0
     tensorMask[tensorMask < 1.0] = 0.0
 
     return tensorOutput[:, :-1, :, :] * tensorMask
@@ -266,7 +267,8 @@ class Extractor(torch.nn.Module):
         tensorSix = self.moduleSix(tensorFiv)
 
         # Removed tensorOne from return because it wasn't used and isn't a multiple of 32
-        return [tensorOne, tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
+        #return [tensorOne, tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
+        return [tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
     # end
 # end
 
@@ -281,7 +283,7 @@ class Decoder(torch.nn.Module):
         self.device=device
 
         intPrevious = [None,
-                       80 + 16 + 2 + 2,
+                       81 + 16 + 2 + 2,
                        81 + 32 + 2 + 2,
                        81 + 64 + 2 + 2,
                        81 + 96 + 2 + 2,
@@ -289,7 +291,7 @@ class Decoder(torch.nn.Module):
                        81,
                        None][intLevel + 1]
         intCurrent = [None,
-                      80 + 16 + 2 + 2,
+                      81 + 16 + 2 + 2,
                       81 + 32 + 2 + 2,
                       81 + 64 + 2 + 2,
                       81 + 96 + 2 + 2,
@@ -424,7 +426,8 @@ class Refiner(torch.nn.Module):
         super(Refiner, self).__init__()
 
         self.moduleMain = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels  = 81 + 16 + 2 + 2 + 128 + 128 + 96 + 64 + 32,
+            #torch.nn.Conv2d(in_channels  = 81 + 16 + 2 + 2 + 128 + 128 + 96 + 64 + 32,
+            torch.nn.Conv2d(in_channels  = 81 + 32 + 2 + 2 + 128 + 128 + 96 + 64 + 32,
                             out_channels = 128,
                             kernel_size  = 3,
                             stride       = 1,
@@ -458,14 +461,18 @@ class Network(torch.nn.Module):
     """
     def __init__(self,
                  device = 'cuda',
-                 use_checkpoint = False):
+                 use_checkpoint = False,
+                 lr_finder=False,
+                 div_flow=20):
         super(Network, self).__init__()
         self.use_checkpoint = use_checkpoint
         self.device = device
+        self.lr_finder = lr_finder
+        self.div_flow = div_flow
 
         self.moduleExtractor = Extractor()
 
-        self.moduleOne = Decoder(1, device=device)
+        #self.moduleOne = Decoder(1, device=device)
         self.moduleTwo = Decoder(2, device=device)
         self.moduleThr = Decoder(3, device=device)
         self.moduleFou = Decoder(4, device=device)
@@ -494,7 +501,9 @@ class Network(torch.nn.Module):
         return custom_forward
     # end_custom
 
-    def forward(self, tensorFirst, tensorSecond):
+    def forward(self, x):
+        tensorFirst = x[:,0,:,:,:]
+        tensorSecond = x[:,1,:,:,:]
         if self.use_checkpoint and self.training:
             # Using a dummy tensor to avoid the error:
             #       UserWarning: None of the inputs have requires_grad=True. Gradients will be None
@@ -536,11 +545,11 @@ class Network(torch.nn.Module):
                                                    tensorSecond[-5],
                                                    objectEstimate,
                                                    dummy_tensor)
-            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleOne),
-                                                   tensorFirst[-6],
-                                                   tensorSecond[-6],
-                                                   objectEstimate,
-                                                   dummy_tensor)
+            #objectEstimate = checkpoint.checkpoint(self.custom(self.moduleOne),
+            #                                       tensorFirst[-6],
+            #                                       tensorSecond[-6],
+            #                                       objectEstimate,
+            #                                       dummy_tensor)
 
             objectEstimate['tensorFeat'] = checkpoint.checkpoint(self.custom(self.moduleRefiner),
                                                                  objectEstimate['tensorFeat'],
@@ -554,22 +563,36 @@ class Network(torch.nn.Module):
             objectEstimate = self.moduleFou(tensorFirst[-3], tensorSecond[-3], objectEstimate)
             objectEstimate = self.moduleThr(tensorFirst[-4], tensorSecond[-4], objectEstimate)
             objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
-            objectEstimate = self.moduleOne(tensorFirst[-6], tensorSecond[-6], objectEstimate)
+            #objectEstimate = self.moduleOne(tensorFirst[-6], tensorSecond[-6], objectEstimate)
 
             objectEstimate['tensorFeat'] = self.moduleRefiner(objectEstimate['tensorFeat'])
+        objectEstimate = (objectEstimate['tensorFlow'] + objectEstimate['tensorFeat'])
+        #print()
+        #print('type objectEstimate: ',type(objectEstimate))
 
-        return objectEstimate['tensorFlow'] + objectEstimate['tensorFeat']
+        if self.lr_finder:
+            # Image is 0.25 of the original size
+            b, n, c, intHeight, intWidth = x.size()
+            objectEstimate = torch.nn.functional.interpolate(
+                                input         = objectEstimate,
+                                size          = (intHeight, intWidth),
+                                mode          = 'bilinear',
+                                align_corners = False)
+            objectEstimate *= self.div_flow
+
+        return objectEstimate
     # end_forward
 # end_Network
 
 
-def flow_pwc2(data=None, device='cuda', use_checkpoint=False):
+def flow_pwc2(data=None, device='cuda', use_checkpoint=False, lr_finder=False, div_flow=20):
     """FlowNetS model architecture from the
     "Learning Optical Flow with Convolutional Networks" paper (https://arxiv.org/abs/1504.06852)
     Args:
         data : pretrained weights of the network. will create a new one if not set
     """
-    moduleNetwork = Network(device=device, use_checkpoint=use_checkpoint)
+    moduleNetwork = Network(device=device, use_checkpoint=use_checkpoint, lr_finder=lr_finder, div_flow=div_flow)
     if data is not None:
-        moduleNetwork.load_state_dict(data['state_dict'])
+        if 'state_dict' in data.keys():
+            moduleNetwork.load_state_dict(data['state_dict'])
     return moduleNetwork

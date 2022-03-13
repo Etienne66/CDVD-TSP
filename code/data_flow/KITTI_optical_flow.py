@@ -103,11 +103,12 @@ def KITTI_2012_occ(root,
                    transform=None,
                    target_transform=None,
                    co_transform=None,
-                   train=True):
+                   train=True,
+                   lr_finder=False):
     train_list = make_dataset(root / 'KITTI_2012', train=train, occ=True)
     train_dataset = ListDataset(root / 'KITTI_2012', train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=KITTI_flow_loader, mask=True)
+                                loader=KITTI_flow_loader, mask=True, lr_finder=False)
     return train_dataset
 
 
@@ -115,22 +116,24 @@ def KITTI_2012_noc(root,
                    transform=None,
                    target_transform=None,
                    co_transform=None,
-                   train=True):
+                   train=True,
+                   lr_finder=False):
     train_list = make_dataset(root / 'KITTI_2012', train=train, occ=False)
     train_dataset = ListDataset(root / 'KITTI_2012', train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=KITTI_flow_loader, mask=True)
+                                loader=KITTI_flow_loader, mask=True, lr_finder=False)
     return train_dataset
 
 def KITTI_2015_occ(root,
                    transform=None,
                    target_transform=None,
                    co_transform=None,
-                   train=True):
+                   train=True,
+                   lr_finder=False):
     train_list = make_dataset(root / 'KITTI_2015', train=train, occ=True)
     train_dataset = ListDataset(root / 'KITTI_2015', train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=KITTI_flow_loader, mask=True)
+                                loader=KITTI_flow_loader, mask=True, lr_finder=False)
     return train_dataset
 
 
@@ -138,9 +141,10 @@ def KITTI_2015_noc(root,
                    transform=None,
                    target_transform=None,
                    co_transform=None,
-                   train=True):
+                   train=True,
+                   lr_finder=False):
     train_list = make_dataset(root / 'KITTI_2015', train=train, occ=False)
     train_dataset = ListDataset(root / 'KITTI_2015', train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=KITTI_flow_loader, mask=True)
+                                loader=KITTI_flow_loader, mask=True, lr_finder=False)
     return train_dataset

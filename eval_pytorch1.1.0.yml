@@ -1,0 +1,23 @@
+name: eval_pytorch1.1.0
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - pillow=6.2.1       
+  - matplotlib
+  - imageio
+  - scikit-image
+  - cupy
+  - opencv
+  - tensorboard
+  - future
+  - matplotlib
+  - matplotlib
+  - matplotlib
+  - pytorch==1.1.0
+  - torchvision==0.3.0
+  - cudatoolkit=10.0
+  - pip
+  - pip:
+    - torch-lr-finder
+    - flow_vis

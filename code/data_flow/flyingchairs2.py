@@ -1,7 +1,19 @@
 import os.path
 import glob
+import numpy as np
+import imageio
+
 from .listdataset import ListDataset
 from .util import split2list
+
+try:
+    import cv2
+except ImportError as e:
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("default", category=ImportWarning)
+        warnings.warn("failed to load openCV, which is needed"
+                      "for KITTI which uses 16bit PNG images", ImportWarning)
 
 
 def load_flow_from_png(png_path):
@@ -59,10 +71,12 @@ def flying_chairs2(root,
                    transform=None,
                    target_transform=None,
                    co_transform=None,
-                   train=True):
+                   train=True,
+                   lr_finder=False):
+    # Image size(512x384)
     train_list = make_dataset(root, train=train)
     train_dataset = ListDataset(root, train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=Chairs_flow_loader, mask=True)
+                                loader=Chairs_flow_loader, mask=True, lr_finder=False)
 
     return train_dataset

@@ -7,6 +7,7 @@ import numpy as np
 import math
 #from torchvision import transforms
 from PIL import Image
+from distutils.version import LooseVersion
 
 def get_patch(*args, patch_size=17, scale=1):
     """
@@ -246,23 +247,37 @@ class EPE(nn.Module):
         Output:
             Averaged end-point-error (value)
         """
-        EPE_loss = torch.norm(target_flow - input_flow, p=2, dim=1)
+        if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
+            EPE_loss = torch.norm(target_flow - input_flow, p=2, dim=1)
+        else:
+            EPE_loss = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
         if self.mean:
             EPE_loss = EPE_loss.mean()
         return EPE_loss
 
     def forward(self, input_flow, target_flow):
-        epe_loss = self.epe(input_flow, target_flow)
+        if target_flow.shape[1]==3:
+            #print('has mask')
+            mask = target_flow[:,2,:,:]
+            target_flow = target_flow[:,:2,:,:]
+            if not self.training:
+                target_flow *= mask[:,None,:,:]
+                input_flow *= mask[:,None,:,:]
+            epe_loss = self.epe(input_flow, target_flow)
+        else:
+            epe_loss = self.epe(input_flow, target_flow)
 
         return epe_loss
 
 
-class F1_KITTI_2015(nn.Module):
-    def __init__(self, device='cuda', tau=[3.0, 0.05]):
-        super(F1_KITTI_2015, self).__init__()
+class Fl_KITTI_2015(nn.Module):
+    def __init__(self, device='cuda', tau=[3.0, 0.05], use_mask=True):
+        super(Fl_KITTI_2015, self).__init__()
         self.tau = tau
+        self.use_mask=use_mask
+        self.device=device
 
-    def f1_kitti_2015(self, input_flow, target_flow):
+    def fl_kitti_2015(self, input_flow, target_flow, mask=None):
         """
         Computation number of outliers
         for which error > 3px(tau[0]) and error/magnitude(ground truth flow) > 0.05(tau[1])
@@ -273,38 +288,33 @@ class F1_KITTI_2015(nn.Module):
             img_size: image size
         Output:
             PCK metric
-
-        function f_err = flow_error (F_gt,F_est,tau)
-            [E,F_val] = flow_error_map (F_gt,F_est);
-            F_mag = sqrt(F_gt(:,:,1).*F_gt(:,:,1)+F_gt(:,:,2).*F_gt(:,:,2));
-            n_err   = length(find(F_val & E>tau(1) & E./F_mag>tau(2)));
-            n_total = length(find(F_val));
-            f_err = n_err/n_total;
-
-
-        function [E,F_gt_val] = flow_error_map (F_gt,F_est)
-            F_gt_du  = shiftdim(F_gt(:,:,1));
-            F_gt_dv  = shiftdim(F_gt(:,:,2));
-            F_gt_val = shiftdim(F_gt(:,:,3));
-
-            F_est_du = shiftdim(F_est(:,:,1));
-            F_est_dv = shiftdim(F_est(:,:,2));
-
-            E_du = F_gt_du-F_est_du;
-            E_dv = F_gt_dv-F_est_dv;
-            E    = sqrt(E_du.*E_du+E_dv.*E_dv);
-            E(F_gt_val==0) = 0;
         """
-        
         # input flow is shape (BxHgtxWgt,2)
-        dist = torch.norm(target_flow - input_flow, p=2, dim=1)
-        gt_magnitude = torch.norm(target_flow, p=2, dim=1)
+        if target_flow.shape[1]==3:
+            mask = target_flow[:,2,:,:]
+            target_flow = target_flow[:,:2,:,:]
+        if self.use_mask:
+            if mask is None:
+                raise ValueError("Mask must be specified if part of the Target")
+            if not self.training:
+                target_flow *= mask[:,None,:,:]
+                input_flow *= mask[:,None,:,:]
+
+        if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
+            dist = torch.norm(target_flow - input_flow, p=2, dim=1)
+            gt_magnitude = torch.norm(target_flow, p=2, dim=1)
+        else:
+            dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
+            gt_magnitude = torch.linalg.vector_norm(target_flow, ord=2, dim=1)
         # dist is shape BxHgtxWgt
         n_err = dist.gt(self.tau[0]) & (dist/gt_magnitude).gt(self.tau[1])
-        f1_loss = n_err.sum()
+        if self.use_mask:
+            f1_loss = n_err.sum()/torch.sum(mask)
+        else:
+            f1_loss = n_err.sum()
         return f1_loss
 
-    def forward(self, input_flow, target_flow):
-        f1_loss = self.f1_kitti_2015(input_flow, target_flow)
+    def forward(self, input_flow, target_flow, mask=None):
+        f1_loss = self.fl_kitti_2015(input_flow, target_flow, mask)
 
         return f1_loss

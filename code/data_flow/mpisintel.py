@@ -65,6 +65,7 @@ def mpi_sintel_both(root,
     '''load images from both clean and final folders.
     We cannot shuffle input, because it would very likely cause data snooping
     for the clean and final frames are not that different'''
+    # Image size(1024x436) Crop to 1024x384
     train_list1 = make_dataset(root / 'MPI_Sintel', 'clean', train=train)
     train_list2 = make_dataset(root / 'MPI_Sintel', 'final', train=train)
     train_dataset = ListDataset(root / 'MPI_Sintel', train_list1 + train_list2, transform, target_transform, co_transform)

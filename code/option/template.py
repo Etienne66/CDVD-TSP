@@ -9,9 +9,9 @@ def set_template(args):
         args.n_feat = 32
         args.n_resblock = 3
         args.size_must_mode = 4
-        args.loss = '1*L1+2*HEM'
-        args.loss_MSL = '0.84*MSL+0.16*L1' # alpha*MSL + (1-alpha)*L1 - Alpha 0.84/0.025 paper/code
-        args.loss_HEM_MSL = '0.84*MSL+0.16*L1+2*HML' # Want to use HEM to focus training
+        #args.loss = '1*L1+2*HEM'
+        #args.loss_MSL = '0.84*MSL+0.16*L1' # alpha*MSL + (1-alpha)*L1 - Alpha 0.84/0.025 paper/code
+        #args.loss_HEM_MSL = '0.84*MSL+0.16*L1+2*HML' # Want to use HEM to focus training
         #args.loss_MSL = '0.16*MSL+0.84*L1' # alpha*MSL + (1-alpha)*L1 - Alpha 0.84/0.025 paper/code
         args.start_time = datetime.now()
         args.total_train_time = datetime.now() - datetime.now()

@@ -4,3 +4,4 @@
 paper/
 pretrain_models/
 *.pyc
+runs/

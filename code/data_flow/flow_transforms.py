@@ -23,10 +23,15 @@ class Compose(object):
     def __init__(self, co_transforms):
         self.co_transforms = co_transforms
 
-    def __call__(self, input, target, mask):
+    def __call__(self, input, target, mask=None):
         for t in self.co_transforms:
-            input,target,mask = t(input,target,mask)
-        return input,target,mask
+            if t is not None:
+                if mask is None:
+                    input,target = t(input,target)
+                    return input,target
+                else:
+                    input,target,mask = t(input,target,mask)
+                    return input,target,mask
 
 
 class ArrayToTensor(object):
@@ -68,7 +73,12 @@ class CenterCrop(object):
         else:
             self.size = size
 
-    def __call__(self, inputs, target, mask):
+    def __call__(self, inputs, target, mask=None):
+        if target.shape[2]==3:
+            mask = target[:,:,2]
+            target = target[:,:,:2]
+        elif mask is None:
+            raise ValueError("Mask must be specified if part of the Target")
         h1, w1, _ = inputs[0].shape
         h2, w2, _ = inputs[1].shape
         th, tw = self.size
@@ -81,7 +91,8 @@ class CenterCrop(object):
         inputs[1] = inputs[1][y2: y2 + th, x2: x2 + tw]
         target = target[y1: y1 + th, x1: x1 + tw]
         mask = mask[y1: y1 + th, x1: x1 + tw]
-        return inputs, target, mask
+        target = np.concatenate((target, mask[:,:,None]), axis=2)
+        return inputs, target
 
 
 class Scale(object):
@@ -126,7 +137,12 @@ class RandomCrop(object):
         else:
             self.size = size
 
-    def __call__(self, inputs,target):
+    def __call__(self, inputs, target, mask=None):
+        if target.shape[2]==3:
+            mask = target[:,:,2]
+            target = target[:,:,:2]
+        elif mask is None:
+            raise ValueError("Mask must be specified if part of the Target")
         h, w, _ = inputs[0].shape
         th, tw = self.size
         if w == tw and h == th:
@@ -136,19 +152,29 @@ class RandomCrop(object):
         y1 = random.randint(0, h - th)
         inputs[0] = inputs[0][y1: y1 + th,x1: x1 + tw]
         inputs[1] = inputs[1][y1: y1 + th,x1: x1 + tw]
-        return inputs, target[y1: y1 + th,x1: x1 + tw]
+        target = target[y1: y1 + th,x1: x1 + tw]
+        mask = mask[y1: y1 + th,x1: x1 + tw]
+        target = np.concatenate((target, mask[:,:,None]), axis=2)
+        return inputs,target
 
 
 class RandomHorizontalFlip(object):
     """Randomly horizontally flips the given PIL.Image with a probability of 0.5
     """
 
-    def __call__(self, inputs, target):
+    def __call__(self, inputs, target, mask=None):
+        if target.shape[2]==3:
+            mask = target[:,:,2]
+            target = target[:,:,:2]
+        elif mask is None:
+            raise ValueError("Mask must be specified if part of the Target")
         if random.random() < 0.5:
             inputs[0] = np.copy(np.fliplr(inputs[0]))
             inputs[1] = np.copy(np.fliplr(inputs[1]))
             target = np.copy(np.fliplr(target))
             target[:,:,0] *= -1
+            mask = np.copy(np.fliplr(mask))
+        target = np.concatenate((target, mask[:,:,None]), axis=2)
         return inputs,target
 
 
@@ -156,12 +182,19 @@ class RandomVerticalFlip(object):
     """Randomly horizontally flips the given PIL.Image with a probability of 0.5
     """
 
-    def __call__(self, inputs, target):
+    def __call__(self, inputs, target, mask=None):
+        if target.shape[2]==3:
+            mask = target[:,:,2]
+            target = target[:,:,:2]
+        elif mask is None:
+            raise ValueError("Mask must be specified if part of the Target")
         if random.random() < 0.5:
             inputs[0] = np.copy(np.flipud(inputs[0]))
             inputs[1] = np.copy(np.flipud(inputs[1]))
             target = np.copy(np.flipud(target))
             target[:,:,1] *= -1
+            mask = np.copy(np.flipud(mask))
+        target = np.concatenate((target, mask[:,:,None]), axis=2)
         return inputs,target
 
 
@@ -170,14 +203,23 @@ class RandomRot90(object):
     """
 
     def __call__(self, inputs, target):
-        print(inputs.shape)
-        print(target.shape)
-        if random.random() < 0.5:
-            inputs[0] = torch.rot90(inputs[0], k=1, dims=[3,4])
-            inputs[1] = torch.rot90(inputs[1], k=1, dims=[3,4])
-            target = torch.rot90(target, k=1, dims=[3,4])
-            target[:,:,1] *= -1
-        return inputs,target
+        pass
+        #print(inputs.shape)
+        #print(target.shape)
+        #if random.random() < 0.5:
+        #    angle_rad = 90.0*np.pi/180
+        #    if torch.is_tensor(inputs[0]):
+        #        inputs[0] = torch.rot90(inputs[0], k=1, dims=[3,4])
+        #        inputs[1] = torch.rot90(inputs[1], k=1, dims=[3,4])
+        #        target = torch.rot90(target, k=1, dims=[3,4])
+        #    else:
+        #        inputs[0] = torch.rot90(inputs[0], k=1, dims=[3,4])
+        #        inputs[1] = torch.rot90(inputs[1], k=1, dims=[3,4])
+        #        target = torch.rot90(target, k=1, dims=[3,4])
+        #        target_ = np.copy(target)
+        #        target[:,:,0] = np.cos(angle1_rad)*target_[:,:,0] + np.sin(angle1_rad)*target_[:,:,1]
+        #        target[:,:,1] = -np.sin(angle1_rad)*target_[:,:,0] + np.cos(angle1_rad)*target_[:,:,1]
+        #return inputs,target
 
 
 class RandomRotate(object):

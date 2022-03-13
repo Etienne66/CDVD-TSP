@@ -11,21 +11,30 @@ def save_checkpoint(state, is_best, save_path, filename='checkpoint.pth.tar'):
 
 
 class AverageMeter(object):
-    """Computes and stores the average and current value"""
+    """Computes and stores the average and current value
+    AverageMeter.sum is a weighted sum
+    AverageMeter.sum is a weighted average
+    AverageMeter.total is a weighted total that assumes the weight was already multiplied by the value
+    AverageMeter.total_avg is a weighted average that assumes the weight was already multiplied by the value
+    """
 
     def __init__(self):
         self.reset()
 
     def reset(self):
         self.val = 0
+        self.total = 0
+        self.total_avg = 0
         self.avg = 0
         self.sum = 0
         self.count = 0
 
     def update(self, val, n=1):
         self.val = val
+        self.total += val
         self.sum += val * n
         self.count += n
+        self.total_avg = self.total / self.count
         self.avg = self.sum / self.count
 
     def __repr__(self):

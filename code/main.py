@@ -70,6 +70,8 @@ if __name__ == '__main__':
         elif platform.system() == 'Linux':
             os.system('spd-say "Your CDVD-TSP program has finished"')
 
+    except SystemExit:
+        pass
     except:
         traceback.print_exc()
         if platform.system() == 'Windows':
