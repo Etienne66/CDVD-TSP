@@ -81,11 +81,11 @@ class ListDataset(data.Dataset):
             target = self.target_transform(target)
 
         mask = mask.astype(np.bool) if LooseVersion(torch.__version__) >= LooseVersion('1.3') else mask.astype(np.uint8)
-        target = np.concatenate((target, mask[None,:,:]), axis=0)
+        #target = np.concatenate((target, mask[None,:,:]), axis=0)
         inputs = torch.stack(inputs)
         
-        return inputs, target
-        #return inputs, target, mask
+        #return inputs, target
+        return inputs, target, mask
 
         """
         return {'from_images': inputs[0],

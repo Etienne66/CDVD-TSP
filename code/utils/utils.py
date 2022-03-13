@@ -271,7 +271,7 @@ class EPE(nn.Module):
 
 
 class Fl_KITTI_2015(nn.Module):
-    def __init__(self, device='cuda', tau=[3.0, 0.05], use_mask=True):
+    def __init__(self, device='cuda', tau=[3.0, 0.05], use_mask=False):
         super(Fl_KITTI_2015, self).__init__()
         self.tau = tau
         self.use_mask=use_mask

@@ -537,9 +537,10 @@ class Network(torch.nn.Module):
         return custom_forward
     # end_custom
 
-    def forward(self, x):
-        tensorFirst = x[:,0,:,:,:]
-        tensorSecond = x[:,1,:,:,:]
+    def forward(self, tensorFirst, tensorSecond):
+    #def forward(self, x):
+    #    tensorFirst = x[:,0,:,:,:]
+    #    tensorSecond = x[:,1,:,:,:]
         if self.use_checkpoint and self.training:
             # Using a dummy tensor to avoid the error:
             #       UserWarning: None of the inputs have requires_grad=True. Gradients will be None
