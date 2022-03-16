@@ -17,6 +17,11 @@ from loss.ssim import MS_SSIM
 import traceback
 
 class Loss(nn.modules.loss._Loss):
+    """
+    For 16-bit data typical values for the PSNR are between 60 and 80 dB
+    Best SSIM/MS-SSIM value is 1.00
+    """
+
     def __init__(self, args, ckp=None):
         super(Loss, self).__init__()
         print('Preparing loss function:')
@@ -52,6 +57,8 @@ class Loss(nn.modules.loss._Loss):
                 loss_function = nn.L1Loss()
             elif loss_type == 'Fl':
                 loss_function = utils.Fl_KITTI_2015(use_mask=True)
+            elif loss_type == 'WAUC':
+                loss_function = utils.WAUC()
             elif loss_type == 'EPE':
                 loss_function = utils.EPE()
             elif loss_type == 'HEM':
@@ -101,8 +108,9 @@ class Loss(nn.modules.loss._Loss):
 
     def forward(self, sr, hr):
         #print('Started loss')
-        loss_EPE = 0
-        loss_Fl = 0
+        loss_EPE = None
+        loss_Fl = None
+        loss_WAUC = None
         if sr.ndimension() == 5:
             output_images = torch.chunk(sr, self.frames_per_stage, dim=1)
             gt_images = torch.chunk(hr, self.frames_per_stage, dim=1)
@@ -132,14 +140,16 @@ class Loss(nn.modules.loss._Loss):
             losses = []
             for i, l in enumerate(self.loss):
                 if l['function'] is not None:
-                    if l['type'] in ('MSL','PSL','SSL'):
+                    if l['type'] in ('MSL','PSL','SSL','WAUC'):
                         loss = 1 - l['function'](sr, hr)
+                        if l['type'] == 'WAUC':
+                            loss_WAUC = loss
                     else:
                         loss = l['function'](sr, hr)
                         if l['type'] == 'EPE':
-                            loss_EPE += loss
+                            loss_EPE = loss
                         elif l['type'] == 'Fl':
-                            loss_Fl += loss
+                            loss_Fl = loss
                     losses.append(l['weight'] * loss)
                 elif l['type'] == 'DIS':
                     pass
@@ -150,8 +160,8 @@ class Loss(nn.modules.loss._Loss):
         if False:#self.lr_finder:
             loss_avg = sum(loss_sum)/len(loss_sum)
             return sum(loss_avg)
-        if not self.lr_finder and (loss_EPE > 0 or loss_Fl > 0):
-            return loss_sum, loss_EPE, loss_Fl
+        if not self.lr_finder and not(loss_EPE is None and loss_Fl is None and loss_WAUC is None):
+            return loss_sum, loss_EPE, loss_Fl, loss_WAUC
         else:
             return loss_sum
 

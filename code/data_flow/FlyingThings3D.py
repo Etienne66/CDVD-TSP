@@ -1,3 +1,13 @@
+"""
+@InProceedings{MIFDB16,
+  author    = "N. Mayer and E. Ilg and P. H{\"a}usser and P. Fischer and D. Cremers and A. Dosovitskiy and T. Brox",
+  title     = "A Large Dataset to Train Convolutional Networks for Disparity, Optical Flow, and Scene Flow Estimation",
+  booktitle = "IEEE International Conference on Computer Vision and Pattern Recognition (CVPR)",
+  year      = "2016",
+  note      = "arXiv:1512.02134",
+  url       = "http://lmb.informatik.uni-freiburg.de/Publications/2016/MIFDB16"
+}
+"""
 from pathlib import Path
 import glob
 from .listdataset import ListDataset

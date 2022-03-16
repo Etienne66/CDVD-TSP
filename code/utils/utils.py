@@ -316,3 +316,50 @@ class Fl_KITTI_2015(nn.Module):
         fl_loss = self.fl_kitti_2015(input_flow, target_flow, mask)
 
         return fl_loss
+
+
+class WAUC(nn.Module):
+    def __init__(self, device='cuda'):
+        super(WAUC, self).__init__()
+        self.device=device
+
+    def Average_Endpoint_Error(self, input_flow, target_flow, mask=None):
+        """
+        Computation number of outliers
+        for which error > 3px(tau[0]) and error/magnitude(ground truth flow) > 0.05(tau[1])
+        Args:
+            input_flow: estimated flow [BxHxW,2]
+            target_flow: ground-truth flow [BxHxW,2]
+        Output:
+            PCK metric
+        """
+        # input flow is shape (BxHgtxWgt,2)
+        if target_flow.shape[1]==3:
+            mask = target_flow[:,2,:,:]
+            target_flow = target_flow[:,:2,:,:]
+        if mask is None:
+            raise ValueError("Mask must be specified if part of the Target")
+        if not self.training:
+            target_flow *= mask[:,None,:,:]
+            input_flow *= mask[:,None,:,:]
+
+        if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
+            dist = torch.norm(target_flow - input_flow, p=2, dim=1)
+        else:
+            dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
+        n_err = 0
+        n_weights = 0
+
+        for i in range(100):
+            weight = (1 - ((i-1)/100))
+            n_err += dist.le(i/20).sum() * weight
+            n_weights += weight
+        
+        wauc_total = (100 * n_err) / (mask.sum() * n_weights)
+
+        return wauc_total
+
+    def forward(self, input_flow, target_flow, mask=None):
+        fl_loss = self.Average_Endpoint_Error(input_flow, target_flow, mask)
+
+        return fl_loss
