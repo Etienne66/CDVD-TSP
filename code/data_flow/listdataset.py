@@ -1,24 +1,38 @@
+import torch
 import torch.utils.data as data
-import os
-import os.path
+from pathlib import Path
 from imageio import imread
 import numpy as np
-from data.util import load_flo
-import torch
+from data_flow.util import load_flo
 from distutils.version import LooseVersion
 
 
 def get_gt_correspondence_mask(flow):
-    # convert flow to mapping
-    flow = np.nan_to_num(flow, nan=-1e10, posinf=1e10, neginf=-1e10)
+    ## convert flow to mapping
     h,w = flow.shape[:2]
-    X, Y = np.meshgrid(np.linspace(0, w - 1, w),
-                       np.linspace(0, h - 1, h))
-    map_x = (flow[:,:,0]+X).astype(np.float32)
-    map_y = (flow[:,:,1]+Y).astype(np.float32)
-    mask_x = np.logical_and(map_x>0, map_x< w)
-    mask_y = np.logical_and(map_y>0, map_y< h)
-    mask = np.logical_and(mask_x, mask_y).astype(np.uint8)
+    ## Just picking a number that is out of bounds instead of NAN
+    #maxhw = h+w
+    #flow = np.nan_to_num(flow, nan=-maxhw, posinf=maxhw, neginf=-maxhw)
+    #X, Y = np.meshgrid(np.linspace(0, w - 1, w),
+    #                   np.linspace(0, h - 1, h))
+    #map_x = (flow[:,:,0]+X).astype(np.float32)
+    #map_y = (flow[:,:,1]+Y).astype(np.float32)
+    #mask_x = np.logical_and(map_x>0, map_x< w)
+    #mask_y = np.logical_and(map_y>0, map_y< h)
+    #mask = np.logical_and(mask_x, mask_y).astype(np.uint8)
+    flow_u = flow[:,:,0]
+    flow_v = flow[:,:,1]
+
+    invalid = np.logical_or(np.logical_or(np.isnan(flow_u), np.isnan(flow_v)),
+                            np.logical_or(np.isinf(flow_u), np.isinf(flow_v)))
+    flow_u[invalid] = 0
+    flow_v[invalid] = 0
+
+    #invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u) >= w, np.abs(flow_v) >= h))
+    #flow_u[invalid] = 0
+    #flow_v[invalid] = 0
+    
+    mask = np.logical_not(invalid)
     return mask
 
 
@@ -69,7 +83,6 @@ class ListDataset(data.Dataset):
         else:
             inputs, target = self.loader(self.root, inputs, target)
             mask = get_gt_correspondence_mask(target)
-
         
         if self.co_transform is not None:
             inputs, target, mask = self.co_transform(inputs, target, mask)

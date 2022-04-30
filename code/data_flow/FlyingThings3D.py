@@ -9,7 +9,8 @@
 }
 """
 from pathlib import Path
-import glob
+import numpy as np
+import imageio
 from .listdataset import ListDataset
 from .util import split2list
 
@@ -81,19 +82,18 @@ def make_dataset(dataset, train=True, final=True):
 
 def Things_flow_loader(root, path_imgs, path_flo):
     flow, mask = load_flow_from_png(path_flo)
-    return [imread(img).astype(np.uint8) for img in path_imgs], flow, mask
+    return [imageio.imread(img).astype(np.uint8) for img in path_imgs], flow, mask
 
 
 def flying_things_clean(root,
                         transform=None,
                         target_transform=None,
                         co_transform=None,
-                        train=True,
-                        lr_finder=False):
+                        train=True):
     train_list = make_dataset(root, train=train, final=False)
     train_dataset = ListDataset(root, train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=Things_flow_loader, mask=True, lr_finder=False)
+                                loader=Things_flow_loader, mask=True)
 
     return train_dataset
 

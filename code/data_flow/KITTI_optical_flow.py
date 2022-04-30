@@ -14,8 +14,6 @@ __maintainer__ = "Steven Wilson"
 __email__ = "Etienne66"
 __status__ = "Development"
 
-import os.path
-import glob
 from data_flow.listdataset import ListDataset
 from data_flow.util import split2list
 from collections import deque
@@ -138,10 +136,9 @@ def KITTI_2015_noc(root,
                    transform=None,
                    target_transform=None,
                    co_transform=None,
-                   train=True,
-                   lr_finder=False):
+                   train=True):
     train_list = make_dataset(root / 'KITTI_2015', train=train, occ=False)
     train_dataset = ListDataset(root / 'KITTI_2015', train_list, transform=transform,
                                 target_transform=target_transform, co_transform=co_transform,
-                                loader=KITTI_flow_loader, mask=True, lr_finder=False)
+                                loader=KITTI_flow_loader, mask=True)
     return train_dataset

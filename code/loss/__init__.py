@@ -31,6 +31,7 @@ class Loss(nn.modules.loss._Loss):
         self.n_GPUs = args.n_GPUs
         self.lr_finder = args.lr_finder
         self.loss = []
+        self.split_losses = args.split_losses
         self.loss_module = nn.ModuleList()
         frames_per_stage_list = [0,1,5,9]
         self.stages = (args.n_sequence // 2)
@@ -50,6 +51,7 @@ class Loss(nn.modules.loss._Loss):
                                [8]]
 
         for loss in args.loss.split('+'):
+        
             weight, loss_type = loss.split('*')
             if loss_type == 'MSE':
                 loss_function = nn.MSELoss()
@@ -57,10 +59,22 @@ class Loss(nn.modules.loss._Loss):
                 loss_function = nn.L1Loss()
             elif loss_type == 'Fl':
                 loss_function = utils.Fl_KITTI_2015(use_mask=True)
-            elif loss_type == 'WAUC':
+            elif loss_type == 'WAUCl':
                 loss_function = utils.WAUC()
             elif loss_type == 'EPE':
                 loss_function = utils.EPE()
+            elif loss_type == 'mWAUCl':
+                loss_function = utils.multiscaleLoss(loss='WAUCl', split_losses=self.split_losses)
+            elif loss_type == 'mEPE':
+                loss_function = utils.multiscaleLoss(loss='EPE', split_losses=self.split_losses)
+            elif loss_type == 'mEPE1':
+                loss_function = utils.multiscaleLoss(loss='EPE1', split_losses=self.split_losses)
+            elif loss_type == 'mL1':
+                loss_function = utils.multiscaleLoss(loss='L1', split_losses=self.split_losses)
+            elif loss_type == 'mL2':
+                loss_function = utils.multiscaleLoss(loss='L2', split_losses=self.split_losses)
+            elif loss_type == 'dummy':
+                loss_function = lambda:0
             elif loss_type == 'HEM':
                 loss_function = HEM(device=device)
             elif loss_type == 'MSL':
@@ -111,57 +125,77 @@ class Loss(nn.modules.loss._Loss):
         loss_EPE = None
         loss_Fl = None
         loss_WAUC = None
-        if sr.ndimension() == 5:
-            output_images = torch.chunk(sr, self.frames_per_stage, dim=1)
-            gt_images = torch.chunk(hr, self.frames_per_stage, dim=1)
-            loss_sum = []
-            for stage in range(self.stages):
+        loss_WAUCl = None
+        if type(sr) not in [tuple, list]:
+            if sr.ndimension() == 5:
+                output_images = torch.chunk(sr, self.frames_per_stage, dim=1)
+                gt_images = torch.chunk(hr, self.frames_per_stage, dim=1)
+                loss_sum = []
+                for stage in range(self.stages):
+                    losses = []
+                    for i, l in enumerate(self.loss):
+                        if l['function'] is not None:
+                            loss = 0
+                            for n in self.stage_list[stage]:
+                                if l['type'] in ('MSL','PSL','SSL'):
+                                    loss += 1 - l['function'](output_images[n], gt_images[n])
+                                else:
+                                    loss += l['function'](output_images[n], gt_images[n])
+                            loss /= self.stage_average[stage]
+                            losses.append(l['weight'] * loss)
+                            if not self.lr_finder:
+                                self.log[-1, i, stage] += loss.detach().cpu().numpy()
+                        elif l['type'] == 'DIS':
+                            if not self.lr_finder:
+                                self.log[-1, i, stage] += self.loss[i - 1]['function'].loss
+                    loss_sum.append(sum(losses))
+                    if len(self.loss) > 1:
+                        if not self.lr_finder:
+                            self.log[-1, -1, stage] += loss_sum[stage].detach().cpu().numpy()
+            else:
                 losses = []
                 for i, l in enumerate(self.loss):
                     if l['function'] is not None:
-                        loss = 0
-                        for n in self.stage_list[stage]:
-                            if l['type'] in ('MSL','PSL','SSL'):
-                                loss += 1 - l['function'](output_images[n], gt_images[n])
-                            else:
-                                loss += l['function'](output_images[n], gt_images[n])
-                        loss /= self.stage_average[stage]
+                        if l['type'] in ('MSL','PSL','SSL'):
+                            loss = 1 - l['function'](sr, hr)
+                        elif l['type'] == 'WAUCl':
+                            loss = 100 - l['function'](sr, hr)
+                            loss_WAUC = 100 - loss
+                        else:
+                            loss = l['function'](sr, hr)
+                            if l['type'] == 'EPE':
+                                loss_EPE = loss
+                            elif l['type'] == 'Fl':
+                                loss_Fl = loss
                         losses.append(l['weight'] * loss)
-                        if not self.lr_finder:
-                            self.log[-1, i, stage] += loss.detach().cpu().numpy()
                     elif l['type'] == 'DIS':
-                        if not self.lr_finder:
-                            self.log[-1, i, stage] += self.loss[i - 1]['function'].loss
-                loss_sum.append(sum(losses))
-                if len(self.loss) > 1:
-                    if not self.lr_finder:
-                        self.log[-1, -1, stage] += loss_sum[stage].detach().cpu().numpy()
+                        pass
+                loss_sum = sum(losses)
         else:
             losses = []
             for i, l in enumerate(self.loss):
                 if l['function'] is not None:
-                    if l['type'] in ('MSL','PSL','SSL','WAUC'):
+                    if l['type'] in ('MSL','PSL','SSL'):
                         loss = 1 - l['function'](sr, hr)
-                        if l['type'] == 'WAUC':
-                            loss_WAUC = loss
+                    elif self.split_losses and l['type'] == 'mWAUCl':
+                        loss, loss_WAUCl = l['function'](sr, hr)
+                    elif self.split_losses and l['type'] in ('mEPE','mEPE1'):
+                        loss, loss_EPE = l['function'](sr, hr)
                     else:
                         loss = l['function'](sr, hr)
-                        if l['type'] == 'EPE':
-                            loss_EPE = loss
-                        elif l['type'] == 'Fl':
-                            loss_Fl = loss
                     losses.append(l['weight'] * loss)
                 elif l['type'] == 'DIS':
                     pass
             loss_sum = sum(losses)
+            
         
         #print('Finishing loss')
         #print('losses', loss_sum, loss_EPE, loss_Fl)
         if False:#self.lr_finder:
             loss_avg = sum(loss_sum)/len(loss_sum)
             return sum(loss_avg)
-        if not self.lr_finder and not(loss_EPE is None and loss_Fl is None and loss_WAUC is None):
-            return loss_sum, loss_EPE, loss_Fl, loss_WAUC
+        if not self.lr_finder and self.training and not(loss_EPE is None and loss_WAUCl is None):
+            return loss_sum, loss_EPE, loss_WAUCl
         else:
             return loss_sum
 

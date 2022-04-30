@@ -51,7 +51,7 @@ parser.add_argument('--resume', type=Path, default=None,
 parser.add_argument('--save_path', type=Path, default='../runs',
                     help='path to save models/tensorboard metrics')
 parser.add_argument('--dataset', metavar='DATASET', default='flying_chairs2', #flying_things_both flying_chairs2 flying_things_final flying_things_clean
-                    choices=dataset_names,
+                    choices=dataset_names,# nargs='*',
                     help='dataset type: ' + ' | '.join(dataset_names))
 parser.add_argument('--testdataset', metavar='DATASET', default='mpi_sintel_final', #mpi_sintel_final mpi_sintel_clean KITTI_2015_occ
                     choices=dataset_names,
@@ -73,6 +73,8 @@ parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--epoch_size', default=0, type=int, metavar='N',
                     help='manual epoch size (will match dataset size if set to 0)')
+parser.add_argument('--test_epoch_size', default=0, type=int, metavar='N',
+                    help='manual epoch size (will match dataset size if set to 0)')
 parser.add_argument('--print_freq', '-p', default=20, type=int,
                     metavar='N', help='print frequency')
 parser.add_argument('--image_freq', default=60, type=int,
@@ -81,26 +83,29 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--no_date', action='store_true',
                     help='don\'t append date timestamp to folder' )
-parser.add_argument('--div_flow', type=int, default=1024, metavar='N', choices=[1,20,256,512,1024],
+parser.add_argument('--div_flow', type=int, default=1024, metavar='N', choices=[1,16,20,256,512,1024],
                     help='value by which flow will be divided. Original value is 20 but 1 with batchNorm gives good results')
+parser.add_argument('--batchnorm', action='store_true',
+                    help='use torch.nn.BatchNorm2d after torch.nn.Conv2d')
 parser.add_argument('--Crop_Size', type=int, default=None, metavar='N', nargs=2,
                     help='Size of random Crop. H W')
-parser.add_argument('--loss', default='1*WAUC+.01*EPE+1*Fl', type=str, metavar='LOSS',
-                    choices=['1*Fl','1*EPE','.1*EPE+1*Fl','.1*EPE+1*Fl','.01*EPE+1*Fl','0*EPE+1*Fl','1*WAUC+.01*EPE+0*Fl',
-                             '1*WAUC+.1*EPE+0*Fl','1*WAUC+0*EPE+0*Fl','1*WAUC+.01*EPE+1*Fl'],
+parser.add_argument('--loss', default='1*mWAUCl+2*mEPE', type=str, metavar='LOSS',
+                    choices=['0*mWAUCl+0*mEPE+1*mL2','.1*mWAUCl+.7*mEPE','1*mWAUCl+2*mEPE','0*mWAUCl+1*mEPE','.1*mWAUCl+2*mEPE','1*mWAUCl+0*mEPE'],
                     help='Loss function. EPE = Average endpoint error; Fl = Percentage of optical flow outliers from 0 to 100 percent')
 parser.add_argument('--rgb_range', type=int, default=1,
                     help='maximum value of RGB')
 parser.add_argument('--seed', type=int, default=1,
                     help='random seed')
+parser.add_argument('--split_losses', action='store_true',
+                    help='split flow losses and graph them')
 
 
 OptimizerGroup = parser.add_argument_group('Optimizer', description='Optimizer options')
 OptimizerGroup.add_argument('--solver', default='adamw',choices=['adam','adamw','sgd'],
                     help='solver algorithms')
-OptimizerGroup.add_argument('--lr', '--learning-rate', default=1e-7, type=float,
-                    metavar='LR', help='initial learning rate')
-OptimizerGroup.add_argument('--max_lr', default=5.3e-6, type=float, metavar='M',
+OptimizerGroup.add_argument('--lr', '--learning-rate', default=1e-7, type=float, metavar='LR',
+                    help='initial learning rate')
+OptimizerGroup.add_argument('--max_lr', default=2e-5, type=float, metavar='M',
                     help='Sets maximum Learning Rate for LRFinder, OneCycleLR, and CyclicLr')
 OptimizerGroup.add_argument('--lr_decay', type=int, default=200, metavar='N',
                     help='learning rate decay per N epochs')
@@ -118,16 +123,16 @@ SchedulerGroup = parser.add_argument_group('Scheduler', description='Scheduler o
 SchedulerGroup.add_argument('--scheduler', default='cycliclr',
                     choices=['multisteplr','steplr','onecyclelr','cycliclr','lr_finder'],
                     help='scheduler algorithms')
-SchedulerGroup.add_argument('--step_size_up', type=int, default=337, metavar='N',
+SchedulerGroup.add_argument('--step_size_up', type=int, default=0, metavar='N',  #337
                     help='Number of training iterations in the increasing half of a cycle.')
 SchedulerGroup.add_argument('--gamma', type=float, default=0.5, metavar='M',
                     help='learning rate decay factor for step decay')
-SchedulerGroup.add_argument('--CyclicLR_gamma', type=float, default=0.99999314397, metavar='M',
+SchedulerGroup.add_argument('--CyclicLR_gamma', type=float, default=0.99999542930698003792558023284368, metavar='M',
                     help='learning rate decay factor for step decay')
 SchedulerGroup.add_argument('--CyclicLR_mode', type=str, default='triangular',
                     choices=['triangular','triangular2','exp_range'],
                     help='learning rate policy')
-SchedulerGroup.add_argument('--milestones', default=[100,150,200], metavar='N', nargs='*',
+SchedulerGroup.add_argument('--milestones', default=[72,108,144,180], metavar='N', nargs='*',
                     help='epochs at which learning rate is divided by 2')
 SchedulerGroup.add_argument('--lr_finder_Leslie_Smith', action='store_true',
                     help='Run the LRFinder using Leslie Smith''s approach')
@@ -145,17 +150,18 @@ def main():
     args.n_iter = int(args.start_epoch)
     args.best_EPE = -1
     args.best_Fl = -1
+    args.best_WAUC = -1
     args.load = None #Used by loss module
     args.n_channel=2
     args.normalize = True
-    args.loss_Flow_net = loss.Loss(args)
+    #args.batchnorm = True
     if args.pretrained:
         network_data = torch.load('../pretrain_models' / args.pretrained, map_location=torch.device(args.device))
         save_path = args.save_path
         if 'state_dict' not in network_data.keys():
             network_data = {'state_dict': network_data}
             args.arch = 'flow_pwc'
-            args.normalize = False
+            args.batchnorm = False
         elif 'args' in network_data.keys():
             args = network_data['args']
             #Don't use state_dict for scheduler and optimizer because this is not a resume
@@ -169,7 +175,7 @@ def main():
             args.n_iter = 0
             
             # Reset random number generators
-            torch.set_rng_state(network_data['rng_state'])
+            torch.set_rng_state(network_data['rng_state'].type(torch.ByteTensor))
             random.setstate(network_data['random_state'])
             np.random.set_state(network_data['numpy_random_state'])
         if args.evaluate:
@@ -178,23 +184,31 @@ def main():
             args.run_path = Path(args.arch + '-' + datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S") + '-PreTrained')
         print("=> using pre-trained model '{}\{}'".format(args.arch,args.pretrained))
     elif args.resume is not None:
+        # Save resume and epochs to restore after loading
         resume = args.resume
+        epochs = args.epochs
+        workers = args.workers
         network_data = torch.load(args.save_path / args.resume, map_location=torch.device(args.device))
         args = network_data['args']
+        #Restore resume and epochs. 
         args.resume = resume
+        args.epochs = epochs
+        args.workers = workers
         
         # Reset device in case the model was saved with a different device
         args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Reset random number generators
-        torch.set_rng_state(network_data['rng_state'])
+        torch.set_rng_state(network_data['rng_state'].type(torch.ByteTensor))
         random.setstate(network_data['random_state'])
         np.random.set_state(network_data['numpy_random_state'])
-        print("=> using trained model '{}\{}'".format(args.arch,args.resume))
+        print("=> using trained model '{}\{}' with divisions '{}'".format(args.arch,args.resume,args.div_flow))
     else:
         network_data = {}
-        print("=> creating model '{}'".format(args.arch))
+        print("=> creating model '{}' with divisions '{}'".format(args.arch,args.div_flow))
         args.run_path = Path(args.arch + '-' + datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S"))
+
+    args.loss_Flow_net = loss.Loss(args)
 
     print('=> will save everything to {}'.format(args.save_path / args.run_path))
     if not (args.save_path / args.run_path).exists():
@@ -209,7 +223,7 @@ def main():
     # Data loading code
     # tranforms.normalize output[channel] = (input[channel] - mean[channel]) / std[channel]
     # All channels are RGB. Loads from OpenCV were corrected
-    if args.normalize:
+    if args.batchnorm:
         input_transform = transforms.Compose([
             flow_transforms.ArrayToTensor(),
             transforms.Normalize(mean=[0, 0, 0], std=[255, 255, 255]), # (0,255) -> (0,1)
@@ -243,7 +257,8 @@ def main():
     ])
 
     co_validate_transform = flow_transforms.Compose([
-        flow_transforms.CenterCrop((320,768))
+        flow_transforms.CenterCrop((704,1280)) if args.testdataset in ('viper') else None, #1920x1080
+        flow_transforms.CenterCrop((320,768)) if args.testdataset in ('mpi_sintel_final','mpi_sintel_clean') else None
     ])
 
     co_transform = flow_transforms.Compose([
@@ -251,6 +266,8 @@ def main():
         flow_transforms.RandomCrop((512,960)) if args.dataset in ('flying_things_clean','flying_things_final','flying_things_both') else None,
         flow_transforms.RandomCrop((384,1024)) if args.dataset in ('mpi_sintel_final','mpi_sintel_clean') else None,
         flow_transforms.RandomCrop((320,1216)) if args.dataset in ('KITTI_2015_occ','KITTI_2015_noc','KITTI_2012_occ','KITTI_2012_noc') else None,
+        #flow_transforms.RandomCrop((704,1280)) if args.dataset in ('viper') else None,#1920x1080
+        flow_transforms.RandomCrop((1024,1920)) if args.dataset in ('viper') else None,#1920x1080
         flow_transforms.RandomCrop(Crop_Size) if args.Crop_Size is not None else None,
         #flow_transforms.RandomRot90() if args.RandomRot90 else None, #flow_transforms.RandomRotate(10,5),
         flow_transforms.RandomVerticalFlip(), #transforms.RandomVerticalFlip,
@@ -292,7 +309,8 @@ def main():
                                        device         = args.device,
                                        use_checkpoint = True,
                                        lr_finder      = args.lr_finder,
-                                       div_flow       = args.div_flow).to(args.device)
+                                       div_flow       = args.div_flow,
+                                       batchnorm      = args.batchnorm).to(args.device)
 
     if args.device.type == "cuda" and args.n_GPUs > 1:
         model = torch.nn.DataParallel(model).cuda()
@@ -354,7 +372,7 @@ def main():
                                                                              'flying_things_final',
                                                                              'flying_things_clean',
                                                                              'flying_things_both',
-                                                                             'Viper'],
+                                                                             'viper'],
                                                             'Test Dataset': ['KITTI_2012_noc',
                                                                              'KITTI_2012_occ',
                                                                              'KITTI_2015_noc',
@@ -417,14 +435,15 @@ def main():
                   'gamma':     args.gamma}
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, **kwargs)
     elif args.scheduler == 'onecyclelr':
-        div_factor = self.args.max_lr / self.args.lr
+        div_factor = args.max_lr / args.lr
         kwargs = {'max_lr':          args.max_lr,
                   'epochs':          args.epochs,
                   'div_factor':      div_factor,
                   'steps_per_epoch': len(train_loader)}
         scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, **kwargs)
     elif args.scheduler == 'cycliclr':
-        args.step_size_up = len(train_loader) if args.step_size_up == 0 else min(len(train_loader), args.step_size_up)
+        args.epoch_size = int(len(train_loader)/2.) * 2 if args.epoch_size == 0 else min(len(train_loader), args.epoch_size)
+        args.step_size_up = int(args.epoch_size/2) if args.step_size_up == 0 else args.step_size_up
         kwargs = {'base_lr':        args.lr,
                   'max_lr':         args.max_lr,
                   'cycle_momentum': False if args.solver != 'sgd' else True, #needs to be False for Adam/AdamW
@@ -491,17 +510,21 @@ def main():
     train_Fl = 0
     test_EPE = 0
     test_Fl = 0
+    test_WAUC = 0
+    train_WAUC = 0
+    
     # This is just for testing. Disable when not needed
     #torch.autograd.set_detect_anomaly(True)
     try:
         for epoch in range(args.start_epoch, args.epochs):
             print('Epoch: {:d}'.format(epoch))
             # train for one epoch
-            train_loss, train_EPE, train_Fl, train_WAUC = train(train_loader, model, optimizer, scheduler, epoch, train_writer_iterations)
+            train_loss, train_EPE, train_Fl, train_WAUC, lr = train(train_loader, model, optimizer, scheduler, epoch, train_writer, train_writer_iterations)
             train_writer.add_scalar('Train/Loss', train_loss, epoch)
             train_writer.add_scalar('Train/EPE', train_EPE, epoch)
             train_writer.add_scalar('Train/Fl', train_Fl, epoch)
             train_writer.add_scalar('Train/WAUC', train_WAUC, epoch)
+            train_writer.add_scalar('Train/lr', lr, epoch)
 
             # evaluate on validation set
             with torch.no_grad():
@@ -516,10 +539,10 @@ def main():
             if args.best_EPE < 0:
                 args.best_EPE = test_EPE
 
-            is_best = test_WAUC < args.best_WAUC
+            is_best = test_WAUC > args.best_WAUC
             args.best_EPE = min(test_EPE, args.best_EPE)
             args.best_Fl = min(test_Fl, args.best_Fl)
-            args.best_WAUC = min(test_WAUC, args.best_WAUC)
+            args.best_WAUC = max(test_WAUC, args.best_WAUC)
             args.start_epoch = epoch + 1
             
             model_state_dict = {}
@@ -581,7 +604,7 @@ def main():
 
 
 
-def train(train_loader, model, optimizer, scheduler, epoch, train_writer):
+def train(train_loader, model, optimizer, scheduler, epoch, train_writer, train_writer_iterations):
     global args
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -589,8 +612,31 @@ def train(train_loader, model, optimizer, scheduler, epoch, train_writer):
     flow2_EPEs = AverageMeter()
     flow2_Fls = AverageMeter()
     flow2_WAUCs = AverageMeter()
+    split2_WAUC = AverageMeter()
+    split3_WAUC = AverageMeter()
+    split4_WAUC = AverageMeter()
+    split5_WAUC = AverageMeter()
+    split6_WAUC = AverageMeter()
+    split2_EPE = AverageMeter()
+    split3_EPE = AverageMeter()
+    split4_EPE = AverageMeter()
+    split5_EPE = AverageMeter()
+    split6_EPE = AverageMeter()
+    learningRates = AverageMeter()
     realEPE = utils.EPE()
-
+    realWAUC = utils.WAUC()
+    realFl = utils.Fl_KITTI_2015(use_mask=True)
+    output0_min = 0
+    output0_max = 0
+    output1_min = 0
+    output1_max = 0
+    output2_min = 0
+    output2_max = 0
+    output3_min = 0
+    output3_max = 0
+    output4_min = 0
+    output4_max = 0
+    
     epoch_size = len(train_loader) if args.epoch_size == 0 else min(len(train_loader), args.epoch_size)
 
     # switch to train mode
@@ -599,74 +645,82 @@ def train(train_loader, model, optimizer, scheduler, epoch, train_writer):
     frames_total = len(train_loader.dataset)
     frames_completed = 0
     end = time.time()
-    with tqdm(total=len(train_loader), position=1, bar_format='{desc}', desc='Waiting for first train batch') as tqdm_desc:
-        tqdm_train = tqdm(train_loader, position=0)
+    with tqdm(total=epoch_size, position=1, bar_format='{desc}', desc='Waiting for first train batch') as tqdm_desc:
+        tqdm_train = tqdm(train_loader, total=epoch_size, position=0)
         for i, (inputs, target) in enumerate(tqdm_train):
+            if i >= epoch_size:
+                tqdm_desc.set_description('Train: EPE {0}\t Fl {1}\t WAUC {2}\t - Train iterations exceeded {3}'.format(
+                                          flow2_EPEs,
+                                          flow2_Fls,
+                                          flow2_WAUCs,
+                                          epoch_size))
+                break
             # measure data loading time
             data_time.update(time.time() - end)
             frames_completed += target.size(0)
             mask = target[:,2,:,:].to(args.device)
             target = target.to(args.device)
+            target[:,:2,:,:] *= mask[:,None,:,:]
             inputs = inputs.to(args.device)
-
-            # compute output
-            b, N, c, intHeight, intWidth = inputs.size()
-            
-            # Need input image resolution to always be a multiple of 64
-            intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
-            intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
-            
-            if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
-                # Faster but same memory utilization. Without detach it is slower but takes less memory.
-                tensorPreprocessedFirst = inputs[:, 0, :, :, :].detach()
-                tensorPreprocessedSecond = inputs[:, 1, :, :, :].detach()
-            else:
-                tensorPreprocessedFirst = torch.nn.functional.interpolate(
-                                            input         = inputs[:, 0, :, :, :],
-                                            size          = (intPreprocessedHeight, intPreprocessedWidth),
-                                            mode          = 'bilinear',
-                                            align_corners = False)
-                tensorPreprocessedSecond = torch.nn.functional.interpolate(
-                                            input         = inputs[:, 1, :, :, :],
-                                            size          = (intPreprocessedHeight, intPreprocessedWidth),
-                                            mode          = 'bilinear',
-                                            align_corners = False)
 
             # compute gradient and do optimization step
             optimizer.zero_grad()
             with torch.set_grad_enabled(True):
-                output = model(torch.stack((tensorPreprocessedFirst, tensorPreprocessedSecond), dim=1))
-                output = torch.nn.functional.interpolate(
-                            input         = output,
-                            size          = (intHeight, intWidth),
-                            mode          = 'bilinear',
-                            align_corners = False)
-                if intPreprocessedWidth != intWidth or intPreprocessedHeight != intHeight:
-                    output[:, 0, :, :] *= float(intWidth) / float(intPreprocessedWidth)
-                    output[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
-                output *= args.div_flow
+                outputs = model(inputs)
+                outputs[0] = outputs[0] * mask[:,None,:,:]
+                output0_min = min(output0_min, torch.min(outputs[0]).item())
+                output0_max = max(output0_max, torch.max(outputs[0]).item())
+                output1_min = min(output1_min, torch.min(outputs[1]).item())
+                output1_max = max(output1_max, torch.max(outputs[1]).item())
+                output2_min = min(output2_min, torch.min(outputs[2]).item())
+                output2_max = max(output2_max, torch.max(outputs[2]).item())
+                output3_min = min(output3_min, torch.min(outputs[3]).item())
+                output3_max = max(output3_max, torch.max(outputs[3]).item())
+                output4_min = min(output4_min, torch.min(outputs[4]).item())
+                output4_max = max(output4_max, torch.max(outputs[4]).item())
 
-                loss_total, loss_EPE, loss_Fl, loss_WAUC = args.loss_Flow_net(output, target)
+                if args.split_losses:
+                    loss_total, loss_EPE, loss_WAUCl = args.loss_Flow_net(outputs, target)
+                    split2_WAUC.update(100 - loss_WAUCl[0], target.size(0))
+                    split3_WAUC.update(100 - loss_WAUCl[1], target.size(0))
+                    split4_WAUC.update(100 - loss_WAUCl[2], target.size(0))
+                    split5_WAUC.update(100 - loss_WAUCl[3], target.size(0))
+                    split6_WAUC.update(100 - loss_WAUCl[4], target.size(0))
+                    split2_EPE.update(loss_EPE[0], target.size(0))
+                    split3_EPE.update(loss_EPE[1], target.size(0))
+                    split4_EPE.update(loss_EPE[2], target.size(0))
+                    split5_EPE.update(loss_EPE[3], target.size(0))
+                    split6_EPE.update(loss_EPE[4], target.size(0))
+                    loss_EPE = loss_EPE[0]
+                    accuracy_WAUC = 100 - loss_WAUCl[0]
+                else:
+                    loss_total = args.loss_Flow_net(outputs, target)
                 loss_total.backward()
                 optimizer.step()
-            lr = scheduler.get_last_lr()[0]
-            if loss_EPE is None:
-                loss_EPE = realEPE(output*mask[:,None,:,:], target*mask[:,None,:,:])
-            train_writer.add_scalar('Epoch{}/Loss'.format(epoch), loss_total, args.n_iter)
-            train_writer.add_scalar('Epoch{}/EPE'.format(epoch), loss_EPE, args.n_iter)
-            train_writer.add_scalar('Epoch{}/Fl'.format(epoch), loss_Fl, args.n_iter)
-            train_writer.add_scalar('Epoch{}/WAUC'.format(epoch), loss_WAUC, args.n_iter)
-            train_writer.add_scalar('Epoch{}/lr'.format(epoch), lr, args.n_iter)
+            # OneCycleLR & CyclicLR need the step right after each training batch
+            if args.scheduler in ['onecyclelr','cycliclr']:
+                scheduler.step()
 
+            with torch.no_grad():
+                if not args.split_losses:
+                    loss_EPE = realEPE(outputs[0], target)
+                    accuracy_WAUC = realWAUC(outputs[0], target)
+                loss_Fl = realFl(outputs[0], target)
+            
+            lr = scheduler.get_last_lr()[0]
+            train_writer_iterations.add_scalar('Epoch{}/Loss'.format(epoch), loss_total, args.n_iter)
+            train_writer_iterations.add_scalar('Epoch{}/EPE'.format(epoch), loss_EPE, args.n_iter)
+            train_writer_iterations.add_scalar('Epoch{}/Fl'.format(epoch), loss_Fl, args.n_iter)
+            train_writer_iterations.add_scalar('Epoch{}/WAUC'.format(epoch), accuracy_WAUC, args.n_iter)
+            train_writer_iterations.add_scalar('Epoch{}/lr'.format(epoch), lr, args.n_iter)
+            
             # record loss and EPE
             losses.update(loss_total, target.size(0))
             flow2_EPEs.update(loss_EPE, target.size(0))
             flow2_Fls.update(loss_Fl, torch.sum(mask).item())
-            flow2_WAUCs.update(loss_Fl, torch.sum(mask).item())
+            flow2_WAUCs.update(accuracy_WAUC, torch.sum(mask).item())
+            learningRates.update(lr, target.size(0))
             
-            # OneCycleLR & CyclicLR need the step right after each training batch
-            if args.scheduler in ['onecyclelr','cycliclr']:
-                scheduler.step()
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -676,18 +730,40 @@ def train(train_loader, model, optimizer, scheduler, epoch, train_writer):
             #    print('Epoch: [{0}][{1}/{2}]\t Time {3}\t Data {4}\t Loss {5}\t EPE {6}'
             #          .format(epoch, i, epoch_size, batch_time,
             #                  data_time, losses, flow2_EPEs))
-            tqdm_desc.set_description('Train: EPE {0}\t Fl {1}\t'.format(
+            tqdm_desc.set_description('Train: EPE {0}\t Fl {1}\t WAUC {2}'.format(
                                        flow2_EPEs,
                                        flow2_Fls,
                                        flow2_WAUCs))
             tqdm_train.set_postfix_str(s='[{}/{}]'.format(frames_completed,
                                                           frames_total))
             args.n_iter += 1
-            if i >= epoch_size:
-                break
+            #if i+1 >= epoch_size:
+            #    break
+    #print('args.n_iter',args.n_iter)
     print('batch_time: {:.5f}'.format(batch_time.sum))
+    print('outputs[0] [min: {:4f}][max: {:4f}]'.format(output0_min, output0_max))
+    print('outputs[1] [min: {:4f}][max: {:4f}]'.format(output1_min, output1_max))
+    print('outputs[2] [min: {:4f}][max: {:4f}]'.format(output2_min, output2_max))
+    print('outputs[3] [min: {:4f}][max: {:4f}]'.format(output3_min, output3_max))
+    print('outputs[4] [min: {:4f}][max: {:4f}]'.format(output4_min, output4_max))
 
-    return losses.avg, flow2_EPEs.avg, flow2_Fls.avg, flow2_WAUCs.avg
+
+    if args.split_losses:
+        train_writer.add_scalars('split_WAUC',
+                                 {'flow2': split2_WAUC.avg,
+                                  'flow3': split3_WAUC.avg,
+                                  'flow4': split4_WAUC.avg,
+                                  'flow5': split5_WAUC.avg,
+                                  'flow6': split6_WAUC.avg},
+                                 epoch)
+        train_writer.add_scalars('split_EPE',
+                                 {'flow2': split2_EPE.avg,
+                                  'flow3': split3_EPE.avg,
+                                  'flow4': split4_EPE.avg,
+                                  'flow5': split5_EPE.avg,
+                                  'flow6': split6_EPE.avg},
+                                 epoch)
+    return losses.avg, flow2_EPEs.avg, flow2_Fls.avg, flow2_WAUCs.avg, learningRates.avg
 
 
 def validate(val_loader, model, epoch, run_writer, inverse_transform):
@@ -716,64 +792,76 @@ def validate(val_loader, model, epoch, run_writer, inverse_transform):
     realEPE = utils.EPE()
     realWAUC = utils.WAUC()
     realFl = utils.Fl_KITTI_2015(use_mask=True)
+    test_epoch_size = len(val_loader) if args.test_epoch_size == 0 else min(len(val_loader), args.test_epoch_size)
     j = 0
     frames_total = len(val_loader.dataset)
     frames_completed = 0
-    with tqdm(total=len(val_loader), position=1, bar_format='{desc}', desc='Waiting for first test batch') as tqdm_desc:
-        tqdm_test = tqdm(val_loader, position=0)
+    with tqdm(total=test_epoch_size, position=1, bar_format='{desc}', desc='Waiting for first test batch') as tqdm_desc:
+        tqdm_test = tqdm(val_loader, total=test_epoch_size, position=0)
         #for i, (inputs, target, mask) in enumerate(tqdm_test):
         for i, (inputs, target) in enumerate(tqdm_test):
+            if i >= test_epoch_size:
+                tqdm_desc.set_description('Train: EPE {0}\t Fl {1}\t WAUC {2}\t - Test iterations exceeded {3}'.format(
+                                          flow2_EPEs,
+                                          flow2_Fls,
+                                          flow2_WAUCs,
+                                          epoch_size))
+                break
             frames_completed += target.size(0)
             mask = target[:,2,:,:].to(args.device)
             #mask = mask.to(args.device)
             target = target[:,:2,:,:].to(args.device)
+            target *= mask[:,None,:,:]
             #target = target[:,:2,:,:].to(args.device)
             inputs = inputs.to(args.device)
             input_mean.update(torch.mean(inputs).item(), target.size(0))
             input_std.update(np.square(torch.mean(inputs).item()), target.size(0))
             
-            b, N, c, intHeight, intWidth = inputs.size()
-            
-            # Need input image resolution to always be a multiple of 64
-            intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
-            intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
-            
-            if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
-                # Faster but same memory utilization. Without detach it is slower but takes less memory.
-                tensorPreprocessedFirst = inputs[:, 0, :, :, :].detach()
-                tensorPreprocessedSecond = inputs[:, 1, :, :, :].detach()
-            else:
-                tensorPreprocessedFirst = torch.nn.functional.interpolate(
-                                            input         = inputs[:, 0, :, :, :],
-                                            size          = (intPreprocessedHeight, intPreprocessedWidth),
-                                            mode          = 'bilinear',
-                                            align_corners = False)
-                tensorPreprocessedSecond = torch.nn.functional.interpolate(
-                                            input         = inputs[:, 1, :, :, :],
-                                            size          = (intPreprocessedHeight, intPreprocessedWidth),
-                                            mode          = 'bilinear',
-                                            align_corners = False)
+            #b, N, c, intHeight, intWidth = inputs.size()
+            #
+            ## Need input image resolution to always be a multiple of 64
+            #intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
+            #intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
+            #
+            #if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
+            #    # Faster but same memory utilization. Without detach it is slower but takes less memory.
+            #    tensorPreprocessedFirst = inputs[:, 0, :, :, :].detach()
+            #    tensorPreprocessedSecond = inputs[:, 1, :, :, :].detach()
+            #else:
+            #    tensorPreprocessedFirst = torch.nn.functional.interpolate(
+            #                                input         = inputs[:, 0, :, :, :],
+            #                                size          = (intPreprocessedHeight, intPreprocessedWidth),
+            #                                mode          = 'bilinear',
+            #                                align_corners = False)
+            #    tensorPreprocessedSecond = torch.nn.functional.interpolate(
+            #                                input         = inputs[:, 1, :, :, :],
+            #                                size          = (intPreprocessedHeight, intPreprocessedWidth),
+            #                                mode          = 'bilinear',
+            #                                align_corners = False)
 
-            output = model(torch.stack((tensorPreprocessedFirst, tensorPreprocessedSecond), dim=1))
+            output = model(inputs)
             #output = model(tensorPreprocessedFirst, tensorPreprocessedSecond)
-            output = torch.nn.functional.interpolate(
-                        input         = output,
-                        size          = (intHeight, intWidth),
-                        mode          = 'bilinear',
-                        align_corners = False)
-            if intPreprocessedWidth != intWidth or intPreprocessedHeight != intHeight:
-                output[:, 0, :, :] *= float(intWidth) / float(intPreprocessedWidth)
-                output[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
-            output *= args.div_flow
+            #output = torch.nn.functional.interpolate(
+            #            input         = output,
+            #            size          = (intHeight, intWidth),
+            #            mode          = 'bilinear',
+            #            align_corners = False)
+            #if intPreprocessedWidth != intWidth or intPreprocessedHeight != intHeight:
+            #    output[:, 0, :, :] *= float(intWidth) / float(intPreprocessedWidth)
+            #    output[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
             output_min = min(output_min, torch.min(output).item())
             output_max = max(output_max, torch.max(output).item())
             target_min = min(target_min, torch.min(target).item())
             target_max = max(target_max, torch.max(target).item())
             inputs_min = min(inputs_min, torch.min(inputs).item())
             inputs_max = max(inputs_max, torch.max(inputs).item())
+            #print('target.size',target.size())
+            #print('target [min: {:4f}][max: {:4f}]'.format(target_min, target_max))
+            #print('inputs [min: {:4f}][max: {:4f}]'.format(inputs_min, inputs_max))
+            #print('output [min: {:4f}][max: {:4f}]'.format(output_min, output_max))
             
             # compute output
-            flow2_EPE = realEPE(output*mask[:,None,:,:], target*mask[:,None,:,:])
+            flow2_EPE = realEPE(output*mask[:,None,:,:], target)
             flow2_Fl = realFl(output, target, mask)
             flow2_WAUC = realWAUC(output, target, mask)
             
@@ -790,7 +878,7 @@ def validate(val_loader, model, epoch, run_writer, inverse_transform):
             if (i * args.test_batch_size) % args.image_freq == 0 and run_writer is not None and j < 3:
                 frame = args.test_batch_size * i
                 
-                if epoch == args.start_epoch:
+                if epoch == 0:
                     target_flow_image = flow_vis.flow_to_color(target[0,:2,:,:].permute((1,2,0)).detach().cpu().numpy(),
                                                                clip_flow=None).transpose((2, 0, 1))
                     run_writer.add_image('GroundTruth{}'.format(frame), target_flow_image, 0)
@@ -808,15 +896,17 @@ def validate(val_loader, model, epoch, run_writer, inverse_transform):
                         run_writer.add_image('Input{}'.format(frame),
                                              inputs[:, 1, :, :, :][0,:3].clamp(0,1).cpu(),
                                              1)
+                    if j == 0:
+                        run_writer.add_graph(model, inputs)
 
                 output_flow_image = flow_vis.flow_to_color(output[0,:2,:,:].permute((1,2,0)).detach().cpu().numpy(),
                                                            clip_flow=None).transpose((2, 0, 1))
                 run_writer.add_image('Output{}'.format(frame),
-                                        output_flow_image,
-                                        epoch)
+                                     output_flow_image,
+                                     epoch)
                 j += 1
 
-            tqdm_desc.set_description('Test: EPE {0}\t Fl {1},\t WAUC {}'.format(
+            tqdm_desc.set_description('Test: EPE {0}\t Fl {1}\t WAUC {2}'.format(
                                        flow2_EPEs,
                                        flow2_Fls,
                                        flow2_WAUCs))
@@ -840,6 +930,15 @@ def validate(val_loader, model, epoch, run_writer, inverse_transform):
 
 if __name__ == '__main__':
     try:
+        if platform.system() == 'Windows':
+            # You can force synchronous computation by setting environment variable CUDA_LAUNCH_BLOCKING=1. This can be handy when an error occurs on the GPU. (With asynchronous execution, such an error isn't reported until after the operation is actually executed, so the stack trace does not show where it was requested.)
+            # https://pytorch.org/docs/stable/notes/cuda.html
+            # to debug cupy_backends.cuda.api.driver.CUDADriverError: CUDA_ERROR_ILLEGAL_ADDRESS: an illegal memory access was encountered
+            env = 'CUDA_LAUNCH_BLOCKING'
+            #if env not in os.environ:
+            #    os.environ[env] = '1'
+            if env in os.environ:
+                del os.environ[env]
         main()
         if platform.system() == 'Windows':
             winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS)
@@ -858,4 +957,8 @@ if __name__ == '__main__':
         elif platform.system() == 'Linux':
             os.system('spd-say "Your CDVD-TSP program has crashed"')
     finally:
+        if platform.system() == 'Windows':
+            env = 'CUDA_LAUNCH_BLOCKING'
+            if env in os.environ:
+                del os.environ[env]
         print("Closed cleanly")

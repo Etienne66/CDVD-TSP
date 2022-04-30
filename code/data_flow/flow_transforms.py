@@ -25,13 +25,16 @@ class Compose(object):
 
     def __call__(self, input, target, mask=None):
         for t in self.co_transforms:
-            if t is not None:
-                if mask is None:
-                    input,target = t(input,target)
-                    return input,target
-                else:
-                    input,target,mask = t(input,target,mask)
-                    return input,target,mask
+            if t is None:
+                continue
+            if mask is None:
+                input,target = t(input,target)
+            else:
+                input,target,mask = t(input,target,mask)
+        if mask is None:
+            return input,target
+        else:
+            return input,target,mask
 
 
 class ArrayToTensor(object):
@@ -79,7 +82,7 @@ class CenterCrop(object):
             mask = target[:,:,2]
             target = target[:,:,:2]
         elif mask is None:
-            raise ValueError("Mask must be specified if part of the Target")
+            raise ValueError("Mask must be provided if not part of the Target")
         h1, w1, _ = inputs[0].shape
         h2, w2, _ = inputs[1].shape
         th, tw = self.size
@@ -147,7 +150,7 @@ class RandomCrop(object):
             mask = target[:,:,2]
             target = target[:,:,:2]
         elif mask is None:
-            raise ValueError("Mask must be specified if part of the Target")
+            raise ValueError("Mask must be provided if not part of the Target")
         h, w, _ = inputs[0].shape
         th, tw = self.size
         if w == tw and h == th:
@@ -176,7 +179,7 @@ class RandomHorizontalFlip(object):
             mask = target[:,:,2]
             target = target[:,:,:2]
         elif mask is None:
-            raise ValueError("Mask must be specified if part of the Target")
+            raise ValueError("Mask must be provided if not part of the Target")
         if random.random() < 0.5:
             inputs[0] = np.copy(np.fliplr(inputs[0]))
             inputs[1] = np.copy(np.fliplr(inputs[1]))
@@ -200,7 +203,7 @@ class RandomVerticalFlip(object):
             mask = target[:,:,2]
             target = target[:,:,:2]
         elif mask is None:
-            raise ValueError("Mask must be specified if part of the Target")
+            raise ValueError("Mask must be provided if not part of the Target")
         if random.random() < 0.5:
             inputs[0] = np.copy(np.flipud(inputs[0]))
             inputs[1] = np.copy(np.flipud(inputs[1]))

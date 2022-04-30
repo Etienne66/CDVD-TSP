@@ -36,7 +36,7 @@ if __name__ == '__main__':
                 line = fp.readline().rstrip()
         
         
-        dest_path = Path('F:/workspaces/CDVD-TSP/dataset/FlyingThings3D_subset')
+        dest_path = Path('../../CDVD-TSP/dataset/FlyingThings3D_subset')
         dest_type = 'image_final'
         for train_path in sorted(imgpath.iterdir()):
             if train_path.is_dir() and train_path.name in ['TEST', 'TRAIN']:

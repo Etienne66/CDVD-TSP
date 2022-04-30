@@ -13,19 +13,32 @@ import platform
 import os
 import traceback
 import winsound
-from data.util import write_flow_png,load_flo,load_flow_from_png
-from data.listdataset import get_gt_correspondence_mask
+from data_flow.util import write_flow_png,load_flo,load_flow_from_png
+from data_flow.listdataset import get_gt_correspondence_mask
 from pathlib import Path
 import imageio
 import numpy as np
 
 if __name__ == '__main__':
     try:
-        #path = Path('F:/workspaces/FlyingChairs2/train') 
-        path = Path('F:/workspaces/FlyingChairs2/val') 
+        path = Path('../../FlyingChairs2/train') 
         destdir = path / Path('flow_png')
         destdir.mkdir(exist_ok=True)
         
+        for flow_path in sorted(path.rglob('*.flo')):
+            flow = load_flo(flow_path)
+            filename =  str(destdir / Path(flow_path.stem + '.png'))
+            print(filename)
+            mask = get_gt_correspondence_mask(flow)
+            write_flow_png(filename, uv=flow, mask=mask)
+            #flow2, mask2 = load_flow_from_png(filename)
+            #np.testing.assert_array_equal(mask, mask2)
+            #np.testing.assert_allclose(flow, flow2, rtol=1e-10, err_msg='flows do not match')
+
+        path = Path('../../FlyingChairs2/val') 
+        destdir = path / Path('flow_png')
+        destdir.mkdir(exist_ok=True)
+
         for flow_path in sorted(path.rglob('*.flo')):
             flow = load_flo(flow_path)
             filename =  str(destdir / Path(flow_path.stem + '.png'))

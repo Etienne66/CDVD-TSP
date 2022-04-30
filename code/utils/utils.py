@@ -234,9 +234,10 @@ def calc_meanFilter_torch(img, kernel_size=11, n_channel=1, device='cuda'):
 
 
 class EPE(nn.Module):
-    def __init__(self, device='cuda', mean=True):
+    def __init__(self, ord=2, device='cuda', mean=True):
         super(EPE, self).__init__()
         self.mean = mean
+        self.ord = ord
 
     def epe(self, input_flow, target_flow):
         """
@@ -246,13 +247,29 @@ class EPE(nn.Module):
             target_flow: ground-truth flow [BxHxW,2]
         Output:
             Averaged end-point-error (value)
+        
+        L1-Norm is "the sum of the absolute vector values, where the absolute value of a scalar uses the notation |a1|. In effect,
+                    the norm is a calculation of the Manhattan distance from the origin of the vector space."
+        >>> x.norm(dim=1, p=1)
+        >>> torch.linalg.norm(x, dim=1, ord=1)
+        >>> x.abs().sum(dim=1)
+        
+        L2-Norm is "the distance of the vector coordinate from the origin of the vector space. The L2 norm is calculated as the 
+                    square root of the sum of the squared vector values."
+        >>> x.norm(dim=1, p=2)
+        >>> torch.linalg.norm(x, dim=1, ord=2)
+        >>> x.pow(2).sum(dim=1).sqrt()
         """
         if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
-            EPE_loss = torch.norm(target_flow - input_flow, p=2, dim=1)
+            EPE_loss = torch.norm(target_flow - input_flow, p=self.ord, dim=1)
         else:
-            EPE_loss = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
+            EPE_loss = torch.linalg.vector_norm(target_flow - input_flow, ord=self.ord, dim=1)
+        
+        batch_size = EPE_loss.size(0)
         if self.mean:
             EPE_loss = EPE_loss.mean()
+        else:
+            EPE_loss = EPE_loss.sum()/batch_size
         return EPE_loss
 
     def forward(self, input_flow, target_flow):
@@ -298,6 +315,11 @@ class Fl_KITTI_2015(nn.Module):
                 target_flow *= mask[:,None,:,:]
                 input_flow *= mask[:,None,:,:]
 
+        #2-Norm is "the distance of the vector coordinate from the origin of the vector space. The L2 norm is calculated as the 
+        #           square root of the sum of the squared vector values."
+        #>>> x.norm(dim=1, p=2)
+        #>>> torch.linalg.norm(x, dim=1, ord=2)
+        #>>> x.pow(2).sum(dim=1).sqrt()
         if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
             dist = torch.norm(target_flow - input_flow, p=2, dim=1)
             gt_magnitude = torch.norm(target_flow, p=2, dim=1)
@@ -316,6 +338,78 @@ class Fl_KITTI_2015(nn.Module):
         fl_loss = self.fl_kitti_2015(input_flow, target_flow, mask)
 
         return fl_loss
+
+
+class multiscaleLoss(nn.Module):
+    def __init__(self, device='cuda', loss='EPE', split_losses=True, weights=None):
+        super(multiscaleLoss, self).__init__()
+        self.device=device
+        self.weights = weights
+        self.loss = loss
+        self.split_losses = split_losses
+        self.realWAUC = WAUC()
+        self.realEPE = EPE(mean=True)
+        self.realEPE1 = EPE(ord=1)
+        self.L1 = EPE(ord=1,mean=False)
+        self.L2 = EPE(mean=False)
+
+        
+    def one_scale(self, output, target):
+        b, _, h, w = output.size()
+        _, _, th, tw = target.size()
+        
+        if h == th and w == tw:
+            target_scaled = target
+        else:
+            # area interpolate is deterministic
+            target_scaled = F.interpolate(target, (h, w), mode='bicubic')
+            # Vectors need to be scaled down
+            #target_scaled[:, 0, :, :] *= float(w) / float(tw)
+            #target_scaled[:, 1, :, :] *= float(h) / float(th)
+        
+        if self.loss == 'WAUCl':
+            loss = 100 - self.realWAUC(output, target_scaled)
+        elif self.loss == 'EPE':
+            loss = self.realEPE(output, target_scaled)
+        elif self.loss == 'EPE1':
+            loss = self.realEPE1(output, target_scaled)
+        elif self.loss == 'L1':
+            loss = self.L1(output, target_scaled)
+        elif self.loss == 'L2':
+            loss = self.L2(output, target_scaled)
+        else:
+            raise NotImplementedError('Loss type [{:s}] is not found'.format(self.loss))
+        return loss
+
+
+    def forward(self, network_output, target_flow):
+        #print('type network_output',type(network_output))
+        if type(network_output) not in [tuple, list]:
+            network_output = [network_output]
+        #if self.weights is None:
+        #    weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
+        #assert(len(weights) == len(network_output))
+
+        loss = 0
+        if self.split_losses and self.loss in ('WAUCl','EPE','EPE1'):
+            if self.weights is None:
+                weights = [1, 0.5, 0.25, 0.25, 0.25]  # as in original article
+            assert(len(weights) == len(network_output))
+            losses=[]
+            for output, weight in zip(network_output, weights):
+                currentLoss = self.one_scale(output, target_flow)
+                losses.append(currentLoss)
+                loss += weight * currentLoss
+            return loss, losses
+        else:
+            if self.weights is None:
+                #These weights are based on mean=False
+                weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
+            assert(len(weights) == len(network_output))
+            for output, weight in zip(network_output, weights):
+                currentLoss = self.one_scale(output, target_flow)
+                loss += weight * currentLoss
+            return loss
 
 
 class WAUC(nn.Module):
