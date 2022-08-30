@@ -224,7 +224,7 @@ kernel_Correlation_updateGradFirst = '''
 	        }
 	      }
 	    }
-	    const int sumelems = (kernel_radius*2+1)(kernel_radius*2+1)*bottomchannels;
+	    const int sumelems = (kernel_radius*2+1)*(kernel_radius*2+1)*bottomchannels;
 	    const int bot0index = ((n * bottomheight) + (m-padding)) * bottomwidth  + (l-padding);
 	    gradFirst[bot0index + intSample*bottomcount] = sum / (float)sumelems;
 	  }
@@ -334,6 +334,19 @@ def cupy_launch(strFunction, strKernel):
 def cupy_launch2(strFunction, strKernel):
     module = cupy.RawModule(code=strKernel)
     return module.get_function(strFunction)
+    #module = cp.RawModule(code=Path('./correlation.cu').read_text())
+    #kernel_Correlation_rearrange = module.get_function('kernel_Correlation_rearrange')
+    #kernel_Correlation_updateOutput = module.get_function('kernel_Correlation_updateOutput')
+# end
+
+
+@cupy.memoize(for_each_device=True)
+def cupy_launch2(strFunction, strKernel):
+    module = cupy.RawModule(code=strKernel)
+    return module.get_function(strFunction)
+    #module = cp.RawModule(code=Path('./correlation.cu').read_text())
+    #kernel_Correlation_rearrange = module.get_function('kernel_Correlation_rearrange')
+    #kernel_Correlation_updateOutput = module.get_function('kernel_Correlation_updateOutput')
 # end
 
 
@@ -343,24 +356,22 @@ class _FunctionCorrelation(torch.autograd.Function):
     
     """
     @staticmethod
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(self,
                 first,
-                second,
-                in_channels = 192,
-                padding = 4,
-                kernel_size = 1,
-                max_displacement = 4,
-                stride1 = 1,
-                stride2 = 1,
-                device = 'cuda'):
+                second):
         global kernel_Correlation_rearrange, kernel_Correlation_updateOutput
+        global gpadding, gkernel_size, gmax_displacement, gstride1, gstride2, gdevice
         #first,second -> B,C,H,W
-        B, channels, height, width = first.shape
-        grid_radius = int(max_displacement / stride2); #4
-        grid_width = int(grid_radius * 2 + 1); #9
-        out_channels = int(grid_width * grid_width); #81
-        pbottomwidth = int(width + 2 * padding);
-        pbottomheight = int(height + 2 * padding);
+        B = cupy.int16(first.shape[0])
+        in_channels = cupy.int16(first.shape[1])
+        height = cupy.int16(first.shape[2])
+        width = cupy.int16(first.shape[3])
+        grid_radius = cupy.int16(gmax_displacement / gstride2); #4
+        grid_width = cupy.int16(grid_radius * 2 + 1); #9
+        out_channels = cupy.int16(grid_width * grid_width); #81
+        pbottomwidth = cupy.int16(width + 2 * gpadding);
+        pbottomheight = cupy.int16(height + 2 * gpadding);
 
         #rbot0,rbot1  -> B,H+2*padding,W+2*padding,C
         rbot0 =  first.new_zeros([B, pbottomheight, pbottomwidth, in_channels])
@@ -375,24 +386,24 @@ class _FunctionCorrelation(torch.autograd.Function):
             n = width * height
             cupy_launch('kernel_Correlation_rearrange',
                         kernel_Correlation_rearrange
-                       )(grid   = tuple([int((n + 16 - 1) / 16), in_channels, B]),
+                       )(grid   = tuple([cupy.int16((n + 16 - 1) / 16), in_channels, B]),
                          block  = tuple([16, 1, 1]),
                          args   = [cupy.int16(width),
                                    cupy.int16(height),
                                    cupy.int16(in_channels),
-                                   cupy.int16(padding),
+                                   cupy.int16(gpadding),
                                    first.data_ptr(),
                                    rbot0.data_ptr()],
                          stream = Stream # added by csbhr
                         )
             cupy_launch('kernel_Correlation_rearrange',
                         kernel_Correlation_rearrange
-                       )(grid   = tuple([int((n + 16 - 1) / 16), in_channels, B]),
+                       )(grid   = tuple([cupy.int16((n + 16 - 1) / 16), in_channels, B]),
                          block  = tuple([16, 1, 1]),
                          args   = [cupy.int16(width),
                                    cupy.int16(height),
                                    cupy.int16(in_channels),
-                                   cupy.int16(padding),
+                                   cupy.int16(gpadding),
                                    second.data_ptr(),
                                    rbot1.data_ptr()],
                          stream = Stream # added by csbhr
@@ -406,11 +417,11 @@ class _FunctionCorrelation(torch.autograd.Function):
                          args       = [cupy.int16(width),
                                        cupy.int16(height),
                                        cupy.int16(in_channels),
-                                       cupy.int16(padding),
-                                       cupy.int16(kernel_size),
-                                       cupy.int16(max_displacement),
-                                       cupy.int16(stride1),
-                                       cupy.int16(stride2),
+                                       cupy.int16(gpadding),
+                                       cupy.int16(gkernel_size),
+                                       cupy.int16(gmax_displacement),
+                                       cupy.int16(gstride1),
+                                       cupy.int16(gstride2),
                                        rbot0.data_ptr(),
                                        rbot1.data_ptr(),
                                        output.data_ptr()],
@@ -424,20 +435,20 @@ class _FunctionCorrelation(torch.autograd.Function):
             fn_kernel_Correlation_updateOutput =  cupy_launch2('kernel_Correlation_updateOutput',
                                                                kernel_Correlation_updateOutput
                                                               )
-            fn_kernel_Correlation_rearrange(grid   = tuple([int((n + 16 - 1) / 16), in_channels, B]),
+            fn_kernel_Correlation_rearrange(grid   = tuple([cupy.int16((n + 16 - 1) / 16), in_channels, B]),
                                             block  = tuple([16, 1, 1]),
                                             args   = (cupy.int16(width),
                                                       cupy.int16(height),
                                                       cupy.int16(in_channels),
-                                                      cupy.int16(padding),
+                                                      cupy.int16(gpadding),
                                                       first.data_ptr(),
                                                       rbot0.data_ptr()))
-            fn_kernel_Correlation_rearrange(grid   = tuple([int((n + 16 - 1) / 16), in_channels, B]),
+            fn_kernel_Correlation_rearrange(grid   = tuple([cupy.int16((n + 16 - 1) / 16), in_channels, B]),
                                             block  = tuple([16, 1, 1]),
                                             args   = (cupy.int16(width),
                                                       cupy.int16(height),
                                                       cupy.int16(in_channels),
-                                                      cupy.int16(padding),
+                                                      cupy.int16(gpadding),
                                                       second.data_ptr(),
                                                       rbot1.data_ptr()))
             fn_kernel_Correlation_updateOutput(grid       = tuple([width, height, B]),
@@ -446,11 +457,11 @@ class _FunctionCorrelation(torch.autograd.Function):
                                                args       = (cupy.int16(width),
                                                              cupy.int16(height),
                                                              cupy.int16(in_channels),
-                                                             cupy.int16(padding),
-                                                             cupy.int16(kernel_size),
-                                                             cupy.int16(max_displacement),
-                                                             cupy.int16(stride1),
-                                                             cupy.int16(stride2),
+                                                             cupy.int16(gpadding),
+                                                             cupy.int16(gkernel_size),
+                                                             cupy.int16(gmax_displacement),
+                                                             cupy.int16(gstride1),
+                                                             cupy.int16(gstride2),
                                                              rbot0.data_ptr(),
                                                              rbot1.data_ptr(),
                                                              output.data_ptr()))
@@ -459,40 +470,34 @@ class _FunctionCorrelation(torch.autograd.Function):
 
         # end
 
-        self.save_for_backward(rbot0,
-                               rbot1,
-                               B,
-                               height,
-                               width,
-                               in_channels,
-                               padding,
-                               kernel_size,
-                               max_displacement,
-                               stride1,
-                               stride2)
+        self.save_for_backward(first, rbot0, rbot1)
 
         return output
     # end_def_forward
 
     @staticmethod
+    @torch.cuda.amp.custom_bwd
     def backward(self, gradOutput):
         global kernel_Correlation_updateGradFirst, kernel_Correlation_updateGradSecond
-        rbot0,rbot1,B,height,width,in_channels,padding,kernel_size,max_displacement,stride1,stride2 = self.saved_tensors
+        global gpadding, gkernel_size, gmax_displacement, gstride1, gstride2, gdevice
+        first, rbot0, rbot1 = self.saved_tensors
+        
+        B, in_channels, height, width = first.shape
         
         gradOutput = gradOutput.contiguous(); assert(gradOutput.is_cuda)
 
-        gradFirst = rbot0.new_zeros([B,
+        gradFirst = first.new_zeros([B,
                                      in_channels,
                                      height,
                                      width]) if self.needs_input_grad[0] else None
-        gradSecond = rbot0.new_zeros([B,
+        gradSecond = first.new_zeros([B,
                                       in_channels,
                                       height,
                                       width]) if self.needs_input_grad[1] else None
 
         pixels = in_channels * height * width
 
-        if rbot0.is_cuda and False:
+        if first.is_cuda and False:
             if gradFirst is not None:
                 for intSample in range(B):
                     cupy_launch('kernel_Correlation_updateGradFirst',
@@ -502,11 +507,11 @@ class _FunctionCorrelation(torch.autograd.Function):
                                  args=[cupy.int16(width),
                                        cupy.int16(height),
                                        cupy.int16(in_channels),
-                                       cupy.int16(padding),
-                                       cupy.int16(kernel_size),
-                                       cupy.int16(max_displacement),
-                                       cupy.int16(stride1),
-                                       cupy.int16(stride2),
+                                       cupy.int16(gpadding),
+                                       cupy.int16(gkernel_size),
+                                       cupy.int16(gmax_displacement),
+                                       cupy.int16(gstride1),
+                                       cupy.int16(gstride2),
                                        cupy.int32(pixels),
                                        cupy.int16(intSample),
                                        rbot1.data_ptr(),
@@ -526,11 +531,11 @@ class _FunctionCorrelation(torch.autograd.Function):
                                  args=[cupy.int16(width),
                                        cupy.int16(height),
                                        cupy.int16(in_channels),
-                                       cupy.int16(padding),
-                                       cupy.int16(kernel_size),
-                                       cupy.int16(max_displacement),
-                                       cupy.int16(stride1),
-                                       cupy.int16(stride2),
+                                       cupy.int16(gpadding),
+                                       cupy.int16(gkernel_size),
+                                       cupy.int16(gmax_displacement),
+                                       cupy.int16(gstride1),
+                                       cupy.int16(gstride2),
                                        cupy.int32(pixels),
                                        cupy.int16(intSample),
                                        rbot0.data_ptr(),
@@ -540,7 +545,7 @@ class _FunctionCorrelation(torch.autograd.Function):
                                 )
             # end
         # end
-        elif rbot0.is_cuda:
+        elif first.is_cuda:
             if gradFirst is not None:
                 fn_kernel_Correlation_updateGradFirst =  cupy_launch2('kernel_Correlation_updateGradFirst',
                                                                       kernel_Correlation_updateGradFirst
@@ -551,11 +556,11 @@ class _FunctionCorrelation(torch.autograd.Function):
                                                           args=(cupy.int16(width),
                                                                 cupy.int16(height),
                                                                 cupy.int16(in_channels),
-                                                                cupy.int16(padding),
-                                                                cupy.int16(kernel_size),
-                                                                cupy.int16(max_displacement),
-                                                                cupy.int16(stride1),
-                                                                cupy.int16(stride2),
+                                                                cupy.int16(gpadding),
+                                                                cupy.int16(gkernel_size),
+                                                                cupy.int16(gmax_displacement),
+                                                                cupy.int16(gstride1),
+                                                                cupy.int16(gstride2),
                                                                 cupy.int32(pixels),
                                                                 cupy.int16(intSample),
                                                                 rbot1.data_ptr(),
@@ -571,17 +576,17 @@ class _FunctionCorrelation(torch.autograd.Function):
                                                            args=(cupy.int16(width),
                                                                  cupy.int16(height),
                                                                  cupy.int16(in_channels),
-                                                                 cupy.int16(padding),
-                                                                 cupy.int16(kernel_size),
-                                                                 cupy.int16(max_displacement),
-                                                                 cupy.int16(stride1),
-                                                                 cupy.int16(stride2),
+                                                                 cupy.int16(gpadding),
+                                                                 cupy.int16(gkernel_size),
+                                                                 cupy.int16(gmax_displacement),
+                                                                 cupy.int16(gstride1),
+                                                                 cupy.int16(gstride2),
                                                                  cupy.int32(pixels),
                                                                  cupy.int16(intSample),
                                                                  rbot0.data_ptr(),
                                                                  gradOutput.data_ptr(),
                                                                  gradSecond.data_ptr()))
-        elif rbot0.is_cuda == False:
+        elif first.is_cuda == False:
             raise NotImplementedError()
         # end
 
@@ -603,7 +608,6 @@ class ModuleCorrelation(torch.nn.Module):
     
     """
     def __init__(self,
-                 in_channels = 192,
                  padding = 4,
                  kernel_size = 1,
                  max_displacement = 4,
@@ -611,16 +615,16 @@ class ModuleCorrelation(torch.nn.Module):
                  stride2 = 1,
                  device = 'cuda'):
         super(ModuleCorrelation, self).__init__()
-        self.in_channels = in_channels
-        self.padding = padding
-        self.kernel_size = kernel_size
-        self.max_displacement = max_displacement
-        self.stride1 = stride1
-        self.stride2 = stride2
-        self.device = device
+        global gpadding, gkernel_size, gmax_displacement, gstride1, gstride2, gdevice
+        gpadding = padding
+        gkernel_size = kernel_size
+        gmax_displacement = max_displacement
+        gstride1 = stride1
+        gstride2 = stride2
+        gdevice = device
         grid_radius = max_displacement / stride2; #4
         grid_width = grid_radius * 2 + 1; #9
-        self.out_channels = grid_width * grid_width; #81
+        out_channels = grid_width * grid_width; #81
         
         #self.FunctionCorrelation = _FunctionCorrelation()
     # end__init__
@@ -629,13 +633,6 @@ class ModuleCorrelation(torch.nn.Module):
         tensorFirst  = x[:,0,:,:,:]
         tensorSecond = x[:,1,:,:,:]
         return _FunctionCorrelation.apply(tensorFirst,
-                                          tensorSecond,
-                                          self.in_channels,
-                                          self.padding,
-                                          self.kernel_size,
-                                          self.max_displacement,
-                                          self.stride1,
-                                          self.stride2,
-                                          self.device)
+                                          tensorSecond)
     # end_forward
 # end_ModuleCorrelation
