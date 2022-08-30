@@ -32,6 +32,7 @@ class Loss(nn.modules.loss._Loss):
         self.lr_finder = args.lr_finder
         self.loss = []
         self.split_losses = args.split_losses
+        self.weights = args.weights
         self.loss_module = nn.ModuleList()
         frames_per_stage_list = [0,1,5,9]
         self.stages = (args.n_sequence // 2)
@@ -64,15 +65,15 @@ class Loss(nn.modules.loss._Loss):
             elif loss_type == 'EPE':
                 loss_function = utils.EPE()
             elif loss_type == 'mWAUCl':
-                loss_function = utils.multiscaleLoss(loss='WAUCl', split_losses=self.split_losses)
+                loss_function = utils.multiscaleLoss(loss='WAUCl', split_losses=self.split_losses, weights= self.weights)
             elif loss_type == 'mEPE':
-                loss_function = utils.multiscaleLoss(loss='EPE', split_losses=self.split_losses)
+                loss_function = utils.multiscaleLoss(loss='EPE', split_losses=self.split_losses, weights= self.weights)
             elif loss_type == 'mEPE1':
-                loss_function = utils.multiscaleLoss(loss='EPE1', split_losses=self.split_losses)
+                loss_function = utils.multiscaleLoss(loss='EPE1', split_losses=self.split_losses, weights= self.weights)
             elif loss_type == 'mL1':
-                loss_function = utils.multiscaleLoss(loss='L1', split_losses=self.split_losses)
+                loss_function = utils.multiscaleLoss(loss='L1', split_losses=self.split_losses, weights= self.weights)
             elif loss_type == 'mL2':
-                loss_function = utils.multiscaleLoss(loss='L2', split_losses=self.split_losses)
+                loss_function = utils.multiscaleLoss(loss='L2', split_losses=self.split_losses, weights= self.weights)
             elif loss_type == 'dummy':
                 loss_function = lambda:0
             elif loss_type == 'HEM':
