@@ -110,7 +110,7 @@ class Flow_PWC(nn.Module):
         #    mask = nn.functional.grid_sample(mask,
         #                                     grid)
 
-        mask[mask < 0.999] = 0
+        mask[mask < 0.9999] = 0
         mask[mask > 0] = 1
 
         output = output * mask
@@ -143,86 +143,88 @@ def Backwarp(tensorInput, tensorFlow, device='cuda'):
     [A reimplementation of PWC-Net in PyTorch that matches the official Caffe version](https://github.com/sniklaus/pytorch-pwc)
     
     """
-    if str(tensorFlow.shape) not in Backwarp_tensorGrid:
-        if LooseVersion(torch.__version__) >= LooseVersion('1.3'):
-            tensorHorizontal = torch.linspace(-1.0 + (1.0 / tensorFlow.shape[3]),
-                                              1.0 - (1.0 / tensorFlow.shape[3]),
-                                              tensorFlow.shape[3],
-                                              device=device
-                                             ).view(1,
-                                                    1,
-                                                    1,
-                                                    -1
-                                                   ).repeat(1,
-                                                            1,
-                                                            tensorFlow.shape[2],
-                                                            1)
-            tensorVertical = torch.linspace(-1.0  + (1.0 / tensorFlow.shape[2]),
-                                            1.0 - (1.0 / tensorFlow.shape[2]),
-                                            tensorFlow.shape[2],
-                                            device=device
-                                           ).view(1,
-                                                  1,
-                                                  -1,
-                                                  1
-                                                 ).repeat(1,
-                                                          1,
-                                                          1,
-                                                          tensorFlow.shape[3])
-        else:
-            tensorHorizontal = torch.linspace(-1.0,
-                                              1.0,
-                                              tensorFlow.shape[3],
-                                              device=device
-                                             ).view(1,
-                                                    1,
-                                                    1,
-                                                    -1
-                                                   ).repeat(1,
-                                                            1,
-                                                            tensorFlow.shape[2],
-                                                            1)
-            tensorVertical = torch.linspace(-1.0,
-                                            1.0,
-                                            tensorFlow.shape[2],
-                                            device=device
-                                           ).view(1,
-                                                  1,
-                                                  -1,
-                                                  1
-                                                 ).repeat(1,
-                                                          1,
-                                                          1,
-                                                          tensorFlow.shape[3])
-        #Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1).to(device)
-        Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1)
+    #if str(tensorFlow.shape) not in Backwarp_tensorGrid:
+    if LooseVersion(torch.__version__) >= LooseVersion('1.3'):
+        tensorHorizontal = torch.linspace(-1.0 + (1.0 / tensorFlow.shape[3]),
+                                          1.0 - (1.0 / tensorFlow.shape[3]),
+                                          tensorFlow.shape[3],
+                                          device=device, requires_grad=True
+                                         ).view(1,
+                                                1,
+                                                1,
+                                                -1
+                                               ).repeat(1,
+                                                        1,
+                                                        tensorFlow.shape[2],
+                                                        1)
+        tensorVertical = torch.linspace(-1.0  + (1.0 / tensorFlow.shape[2]),
+                                        1.0 - (1.0 / tensorFlow.shape[2]),
+                                        tensorFlow.shape[2],
+                                        device=device, requires_grad=True
+                                       ).view(1,
+                                              1,
+                                              -1,
+                                              1
+                                             ).repeat(1,
+                                                      1,
+                                                      1,
+                                                      tensorFlow.shape[3])
+        tensorFlow = torch.cat([tensorFlow[:, 0:1, :, :] / ((tensorInput.size(3) - 1.0) / 2.0),
+                                tensorFlow[:, 1:2, :, :] / ((tensorInput.size(2) - 1.0) / 2.0)],
+                               1)
+    else:
+        tensorHorizontal = torch.linspace(-1.0,
+                                          1.0,
+                                          tensorFlow.shape[3],
+                                          device=device, requires_grad=True
+                                         ).view(1,
+                                                1,
+                                                1,
+                                                -1
+                                               ).repeat(1,
+                                                        1,
+                                                        tensorFlow.shape[2],
+                                                        1)
+        tensorVertical = torch.linspace(-1.0,
+                                        1.0,
+                                        tensorFlow.shape[2],
+                                        device=device, requires_grad=True
+                                       ).view(1,
+                                              1,
+                                              -1,
+                                              1
+                                             ).repeat(1,
+                                                      1,
+                                                      1,
+                                                      tensorFlow.shape[3])
+    #Backwarp_tensorGrid[str(tensorFlow.size())] = torch.cat([tensorHorizontal, tensorVertical], 1).to(device)
+    Backwarp_tensorGrid = torch.cat([tensorHorizontal, tensorVertical], 1)
     # end
 
-    if str(tensorFlow.size()) not in Backwarp_tensorPartial:
-        Backwarp_tensorPartial[str(tensorFlow.size())] = tensorFlow.new_ones([tensorFlow.size(0),
-                                                                             1,
-                                                                             tensorFlow.size(2),
-                                                                             tensorFlow.size(3)])
+    #if str(tensorFlow.size()) not in Backwarp_tensorPartial:
+    Backwarp_tensorPartial = tensorFlow.new_ones([tensorFlow.size(0),
+                                                 1,
+                                                 tensorFlow.size(2),
+                                                 tensorFlow.size(3)], requires_grad=True)
     # end
 
-    tensorFlow = torch.cat([tensorFlow[:, 0:1, :, :] / ((tensorInput.size(3) - 1.0) / 2.0),
-                            tensorFlow[:, 1:2, :, :] / ((tensorInput.size(2) - 1.0) / 2.0)],
-                           1)
     tensorInput = torch.cat([tensorInput,
-                             Backwarp_tensorPartial[str(tensorFlow.size())]],
+                             Backwarp_tensorPartial],
                             1)
 
     if LooseVersion(torch.__version__) >= LooseVersion('1.3'):
         tensorOutput = torch.nn.functional.grid_sample(input=tensorInput,
-                                                       grid=(Backwarp_tensorGrid[str(tensorFlow.size())] + tensorFlow
-                                                            ).permute(0, 2, 3, 1),
+                                                       #grid=(Backwarp_tensorGrid[str(tensorFlow.size())] + tensorFlow
+                                                       #     ).permute(0, 2, 3, 1),
+                                                       grid=(Backwarp_tensorGrid + tensorFlow).permute(0, 2, 3, 1),
                                                        mode='bilinear',
                                                        padding_mode='zeros',
                                                        align_corners=False)
     else:
         tensorOutput = torch.nn.functional.grid_sample(input=tensorInput,
-                                                       grid=(Backwarp_tensorGrid[str(tensorFlow.size())] + tensorFlow
-                                                            ).permute(0, 2, 3, 1),
+                                                       #grid=(Backwarp_tensorGrid[str(tensorFlow.size())] + tensorFlow
+                                                       #     ).permute(0, 2, 3, 1),
+                                                       grid=(Backwarp_tensorGrid + tensorFlow).permute(0, 2, 3, 1),
                                                        mode='bilinear',
                                                        padding_mode='zeros')
     tensorMask = tensorOutput[:, -1:, :, :]
@@ -539,8 +541,33 @@ class Network(torch.nn.Module):
 
     #def forward(self, tensorFirst, tensorSecond):
     def forward(self, x):
-        tensorFirst = x[:,0,:,:,:]
-        tensorSecond = x[:,1,:,:,:]
+        b, N, c, intHeight, intWidth = x.size()
+        
+        # Need input image resolution to always be a multiple of 64
+        intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
+        intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
+        
+        if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
+            # Faster but same memory utilization. Without detach it is slower but takes less memory.
+            tensorFirst = x[:, 0, :, :, :]
+            tensorSecond = x[:, 1, :, :, :]
+        else:
+            tensorFirst = nn.functional.interpolate(
+                            input         = x[:,0,:,:,:],
+                            size          = (intPreprocessedHeight, intPreprocessedWidth),
+                            mode          = 'bicubic',
+                            align_corners = False,
+                            antialias     = True)
+            tensorSecond = nn.functional.interpolate(
+                            input         = x[:,1,:,:,:],
+                            size          = (intPreprocessedHeight, intPreprocessedWidth),
+                            mode          = 'bicubic',
+                            align_corners = False,
+                            antialias     = True)
+
+
+        if self.training:
+            output=[None,None,None,None,None]
         if self.use_checkpoint and self.training:
             # Using a dummy tensor to avoid the error:
             #       UserWarning: None of the inputs have requires_grad=True. Gradients will be None
@@ -557,66 +584,99 @@ class Network(torch.nn.Module):
                                                  tensorSecond,
                                                  dummy_tensor)
 
-            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleSix),
-                                                   tensorFirst[-1],
-                                                   tensorSecond[-1],
-                                                   None,
-                                                   dummy_tensor)
-            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleFiv),
-                                                   tensorFirst[-2],
-                                                   tensorSecond[-2],
-                                                   objectEstimate,
-                                                   dummy_tensor)
-            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleFou),
-                                                   tensorFirst[-3],
-                                                   tensorSecond[-3],
-                                                   objectEstimate,
-                                                   dummy_tensor)
-            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleThr),
-                                                   tensorFirst[-4],
-                                                   tensorSecond[-4],
-                                                   objectEstimate,
-                                                   dummy_tensor)
-            objectEstimate = checkpoint.checkpoint(self.custom(self.moduleTwo),
-                                                   tensorFirst[-5],
-                                                   tensorSecond[-5],
-                                                   objectEstimate,
-                                                   dummy_tensor)
+            objectEstimate6 = checkpoint.checkpoint(self.custom(self.moduleSix),
+                                                    tensorFirst[-1],
+                                                    tensorSecond[-1],
+                                                    None,
+                                                    dummy_tensor)
+            if self.training:
+                output[4] = objectEstimate6['tensorFlow']
+            objectEstimate5 = checkpoint.checkpoint(self.custom(self.moduleFiv),
+                                                    tensorFirst[-2],
+                                                    tensorSecond[-2],
+                                                    objectEstimate6,
+                                                    dummy_tensor)
+            if self.training:
+                output[3] = objectEstimate5['tensorFlow']
+            objectEstimate4 = checkpoint.checkpoint(self.custom(self.moduleFou),
+                                                    tensorFirst[-3],
+                                                    tensorSecond[-3],
+                                                    objectEstimate5,
+                                                    dummy_tensor)
+            if self.training:
+                output[2] = objectEstimate4['tensorFlow']
+            objectEstimate3 = checkpoint.checkpoint(self.custom(self.moduleThr),
+                                                    tensorFirst[-4],
+                                                    tensorSecond[-4],
+                                                    objectEstimate4,
+                                                    dummy_tensor)
+            if self.training:
+                output[1] = objectEstimate3['tensorFlow']
+            objectEstimate2 = checkpoint.checkpoint(self.custom(self.moduleTwo),
+                                                    tensorFirst[-5],
+                                                    tensorSecond[-5],
+                                                    objectEstimate3,
+                                                    dummy_tensor)
+            #objectEstimate1 = checkpoint.checkpoint(self.custom(self.moduleOne),
+            #                                       tensorFirst[-6],
+            #                                       tensorSecond[-6],
+            #                                       objectEstimate2,
+            #                                       dummy_tensor)
 
-            objectEstimate['tensorFeat'] = checkpoint.checkpoint(self.custom(self.moduleRefiner),
-                                                                 objectEstimate['tensorFeat'],
-                                                                 dummy_tensor)
+            objectEstimate2['tensorFeat'] = checkpoint.checkpoint(self.custom(self.moduleRefiner),
+                                                                  objectEstimate2['tensorFeat'],
+                                                                  dummy_tensor)
         else:
             tensorFirst  = self.moduleExtractor(tensorFirst)
             tensorSecond = self.moduleExtractor(tensorSecond)
             
-            objectEstimate = self.moduleSix(tensorFirst[-1], tensorSecond[-1], None)
-            objectEstimate = self.moduleFiv(tensorFirst[-2], tensorSecond[-2], objectEstimate)
-            objectEstimate = self.moduleFou(tensorFirst[-3], tensorSecond[-3], objectEstimate)
-            objectEstimate = self.moduleThr(tensorFirst[-4], tensorSecond[-4], objectEstimate)
-            objectEstimate = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate)
+            objectEstimate6 = self.moduleSix(tensorFirst[-1], tensorSecond[-1], None)
+            if self.training:
+                output[4] = objectEstimate6['tensorFlow']
+            objectEstimate5 = self.moduleFiv(tensorFirst[-2], tensorSecond[-2], objectEstimate6)
+            if self.training:
+                output[3] = objectEstimate5['tensorFlow']
+            objectEstimate4 = self.moduleFou(tensorFirst[-3], tensorSecond[-3], objectEstimate5)
+            if self.training:
+                output[2] = objectEstimate4['tensorFlow']
+            objectEstimate3 = self.moduleThr(tensorFirst[-4], tensorSecond[-4], objectEstimate4)
+            if self.training:
+                output[1] = objectEstimate3['tensorFlow']
+            objectEstimate2 = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate3)
+            #objectEstimate1 = self.moduleOne(tensorFirst[-6], tensorSecond[-6], objectEstimate2)
 
-            objectEstimate['tensorFeat'] = self.moduleRefiner(objectEstimate['tensorFeat'])
-        objectEstimate = (objectEstimate['tensorFlow'] + objectEstimate['tensorFeat'])
-        #print()
-        #print('type objectEstimate: ',type(objectEstimate))
+            objectEstimate2['tensorFeat'] = self.moduleRefiner(objectEstimate2['tensorFeat'])
+        objectEstimate = objectEstimate2['tensorFlow'] + objectEstimate2['tensorFeat']
 
-        if self.lr_finder:
-            # Image is 0.25 of the original size
-            b, n, c, intHeight, intWidth = x.size()
-            objectEstimate = torch.nn.functional.interpolate(
+        if self.training :
+            # bicubic interpolate is nondeterministic. However the objectEstimate2 is 0.25 the size of the original image
+            # Move to CPU to make it deterministic
+            output[0] = objectEstimate
+            for i in range(len(output)):
+                output[i] = nn.functional.interpolate(
+                                    input         = output[i],
+                                    size          = (intHeight, intWidth),
+                                    mode          = 'bicubic',
+                                    align_corners = False)
+                output[i][:, 0, :, :] *= self.div_flow * intWidth / intPreprocessedWidth
+                output[i][:, 1, :, :] *= self.div_flow * intHeight / intPreprocessedHeight
+            return output
+        else:
+            # bicubic interpolate is nondeterministic. However the objectEstimate2 is 0.25 the size of the original image
+            # Move to CPU to make it deterministic
+            objectEstimate = nn.functional.interpolate(
                                 input         = objectEstimate,
                                 size          = (intHeight, intWidth),
-                                mode          = 'bilinear',
+                                mode          = 'bicubic',
                                 align_corners = False)
-            objectEstimate *= self.div_flow
-            
-        return objectEstimate
+            objectEstimate[:, 0, :, :] *= self.div_flow * intWidth / intPreprocessedWidth
+            objectEstimate[:, 1, :, :] *= self.div_flow * intHeight / intPreprocessedHeight
+            return objectEstimate
     # end_forward
 # end_Network
 
 
-def flow_pwc(data=None, device='cuda', use_checkpoint=False, lr_finder=False, div_flow=20):
+def flow_pwc(data=None, device='cuda', use_checkpoint=False, lr_finder=False, div_flow=20, batchnorm=False):
     """FlowNetS model architecture from the
     "Learning Optical Flow with Convolutional Networks" paper (https://arxiv.org/abs/1504.06852)
     Args:
