@@ -222,7 +222,7 @@ def calc_meanFilter_torch(img, kernel_size=11, n_channel=1, device='cuda'):
     mean_filter_X = torch.ones(size   = (1, 1, kernel_size, kernel_size),
                                dtype  = torch.float32,
                                device = device
-                              ).div_(kernel_size * kernel_size).float()
+                              ).div_(kernel_size * kernel_size)
     new_img = torch.zeros_like(img, device=device)
     for i in range(n_channel):
         new_img[:, i:i + 1, :, :] = F.conv2d(img[:, i:i + 1, :, :],
@@ -393,22 +393,32 @@ class multiscaleLoss(nn.Module):
         loss = 0
         if self.split_losses and self.loss in ('WAUCl','EPE','EPE1'):
             if self.weights is None:
-                weights = [1, 0.5, 0.25, 0.25, 0.25]  # as in original article
-            assert(len(weights) == len(network_output))
+                if len(network_output) == 6:
+                    self.weights = [1, 0.5, 0.25, 0.25, 0.25, 0.25]  # as in original article but converted for mean loss
+                else:
+                    self.weights = [1, 0.5, 0.25, 0.25, 0.25]  # as in original article but converted for mean loss
+                #weights = [1, 1, 1, 1, 1]  # as in original article but converted for mean loss
+            assert(len(self.weights) == len(network_output))
             losses=[]
-            for output, weight in zip(network_output, weights):
-                currentLoss = self.one_scale(output, target_flow)
-                losses.append(currentLoss)
-                loss += weight * currentLoss
+            for output, weight in zip(network_output, self.weights):
+                if output is not None:
+                    currentLoss = self.one_scale(output, target_flow)
+                    losses.append(currentLoss)
+                    loss += weight * currentLoss
+                else:
+                    losses.append(None)
             return loss, losses
         else:
             if self.weights is None:
                 #These weights are based on mean=False
-                weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
-            assert(len(weights) == len(network_output))
-            for output, weight in zip(network_output, weights):
-                currentLoss = self.one_scale(output, target_flow)
-                loss += weight * currentLoss
+                self.weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
+            assert(len(self.weights) == len(network_output))
+            for output, weight in zip(network_output, self.weights):
+                if output is not None:
+                    currentLoss = self.one_scale(output, target_flow)
+                    loss += weight * currentLoss
+                else:
+                    losses.append(None)
             return loss
 
 
