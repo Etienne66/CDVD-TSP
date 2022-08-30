@@ -33,9 +33,10 @@ class HEM(nn.Module):
             random_mask = np.reshape(random_mask, (b, 1, h, w))
 
             mask = hard_mask + random_mask
-            mask = (mask > 0.).astype(np.float32)
+            #mask = (mask > 0.).astype(np.float32)
+            mask = mask > 0.
 
-            mask = torch.Tensor(mask).to(self.device)
+            mask = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
 
         return mask
 
