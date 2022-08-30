@@ -6,6 +6,7 @@ import torch
 import torch.utils.data as data
 from torch.utils.data import DistributedSampler
 import torch.nn.functional as F
+import torchvision.transforms as transforms
 
 import os
 import math
@@ -15,11 +16,12 @@ import os.path as osp
 from pathlib import Path
 import re
 
-from utils import frame_utils
-from utils.augmentor import FlowAugmentor, SparseFlowAugmentor
-from utils.utils import print0
 from sklearn.model_selection import train_test_split
 import cv2
+
+from .utils import frame_utils
+from .utils.augmentor import FlowAugmentor, SparseFlowAugmentor
+from .utils.utils import print0
 
 shift_info_printed = False
 
@@ -43,7 +45,7 @@ class FlowDataset(data.Dataset):
 
         # if is_test, do not return flow (only for LB submission).
         self.is_test = False
-        self.init_seed = False
+        self.init_seed = True
         self.flow_list = []
         self.image_list = []
         self.extra_info = None
@@ -56,7 +58,13 @@ class FlowDataset(data.Dataset):
             extra_info = self.extra_info[index]
         else:
             extra_info = 0
-            
+        input_transform = transforms.Compose([
+            #flow_transforms.ArrayToTensor(),
+            transforms.Normalize(mean=[0, 0, 0], std=[255, 255, 255])#, # (0,255) -> (0,1)
+            #transforms.Normalize(mean=[0.45,0.432,0.411], std=[1,1,1]) # (0,1) -> (-0.5,0.5)
+            #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # from ImageNet dataset
+            #transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]) # Standard normalization
+        ])
         # if is_test, do not return flow (only for LB submission).
         # If there's groundtruth flow, then is_test=False, e.g. on chairs and things.
         if self.is_test:
@@ -122,6 +130,10 @@ class FlowDataset(data.Dataset):
             img1 = img1[..., :3]
             img2 = img2[..., :3]
 
+        #img1 = input_transform(torch.from_numpy(img1).permute(2, 0, 1).float()).to('cuda')
+        #img2 = input_transform(torch.from_numpy(img2).permute(2, 0, 1).float()).to('cuda')
+        #flow = torch.from_numpy(flow).permute(2, 0, 1).float().to('cuda')
+
         if self.augmentor is not None:
             if self.sparse:
                 img1, img2, flow, valid = self.augmentor(img1, img2, flow, valid)
@@ -129,21 +141,38 @@ class FlowDataset(data.Dataset):
                 # shift augmentation will return valid. Otherwise valid is None.
                 img1, img2, flow, valid = self.augmentor(img1, img2, flow)
 
-        img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
-        img2 = torch.from_numpy(img2).permute(2, 0, 1).float()
+        img1 = input_transform(torch.from_numpy(img1).permute(2, 0, 1).float())
+        img2 = input_transform(torch.from_numpy(img2).permute(2, 0, 1).float())
         flow = torch.from_numpy(flow).permute(2, 0, 1).float()
 
+        images = torch.stack((img1, img2))
+
         if valid is not None:
-            valid = torch.from_numpy(valid)
+            if not torch.is_tensor(valid):
+                valid = torch.from_numpy(valid)
         else:
-            valid = (flow[0].abs() < 1000) & (flow[1].abs() < 1000)
+            if torch.is_tensor(img1):
+                #valid = (flow[0].abs() < 1000) & (flow[1].abs() < 1000)
+                flow_u = flow[0]
+                flow_v = flow[1]
+                invalid = torch.logical_or(torch.logical_or(torch.isnan(flow_u), torch.isnan(flow_v)),
+                                           torch.logical_or(torch.isinf(flow_u), torch.isinf(flow_v)))
+                valid = torch.logical_not(invalid)
+            else:
+                #valid = (flow[0].abs() < 1000) & (flow[1].abs() < 1000)
+                flow_u = flow[0]
+                flow_v = flow[1]
+                invalid = np.logical_or(np.logical_or(np.isnan(flow_u), np.isnan(flow_v)),
+                                        np.logical_or(np.isinf(flow_u), np.isinf(flow_v)))
+                valid = np.logical_not(invalid)
+        flow = torch.cat((flow, valid[None,:,:]), dim=0)
 
         if self.occ_list is not None:
             return img1, img2, flow, valid.float(), occ, self.occ_list[index]
         elif self.seg_list is not None and self.seg_inv_list is not None:
             return img1, img2, flow, valid.float(), seg_map, seg_inv
         else:
-            return img1, img2, flow, valid.float(), extra_info
+            return images, flow
 
     def __rmul__(self, v):
         self.flow_list = v * self.flow_list
@@ -232,7 +261,7 @@ class FlyingChairs(FlowDataset):
         print(f"{self.ds_name}: {len(self.image_list)} image pairs.")
 
 class FlyingChairs2(FlowDataset):
-    def __init__(self, aug_params=None, split='training', root=Path('datasets/FlyingChairs2')):
+    def __init__(self, aug_params=None, split='training', root=Path('../datasets/FlyingChairs2')):
         self.ds_name = f'chairs2-{split}'
         super(FlyingChairs2, self).__init__(aug_params)
 
@@ -269,14 +298,14 @@ class FlyingChairs2(FlowDataset):
             exit()
 
 class FlyingThings3D(FlowDataset):
-    def __init__(self, aug_params=None, root='datasets/FlyingThings3D', split='training', dstype='frames_cleanpass'):
-        ds_type_short = { 'frames_cleanpass': 'clean', 
-                          'frames_finalpass': 'final' }
+    def __init__(self, aug_params=None, root=Path('../datasets/FlyingThings3D_subset'), split='training', dstype='image_final'):
+        ds_type_short = { 'image_clean': 'clean', 
+                          'image_final': 'final' }
         self.ds_name = f'things-{split}-{ds_type_short[dstype]}'
         super(FlyingThings3D, self).__init__(aug_params)
 
         if split == 'training':
-            for cam in ['left']:
+            for cam in ['left','right']:
                 for direction in ['into_future', 'into_past']:
                     image_dirs = sorted(glob(osp.join(root, dstype, 'TRAIN/*/*')))
                     image_dirs = sorted([osp.join(f, cam) for f in image_dirs])
@@ -413,12 +442,12 @@ class HD1K(FlowDataset):
         print(f"{self.ds_name}: {len(self.image_list)} image pairs.")
 
 class Autoflow(FlowDataset):
-    def __init__(self, aug_params=None, split='training', root=Path('datasets/AutoFlow'),
+    def __init__(self, aug_params=None, split='training', root=Path('../datasets/AutoFlow'),
                  debug=False):
         self.ds_name = f'autoflow-{split}'
         super(Autoflow, self).__init__(aug_params)
 
-        scene_count = len(root.iterdir())
+        scene_count = len(list(root.iterdir()))
         #training_size = int(scene_count * 0.9)
         training_size = int(scene_count * 1.1)
         if debug:
@@ -558,41 +587,41 @@ class SlowFlow(FlowDataset):
 
 
 # 'crop_size' is first used to bound the minimal size of images after resizing. Then it's used to crop the image.
-def fetch_dataloader(args, SINTEL_TRAIN_DS='C+T+K+S+H'):
+def fetch_dataloader(args, mini_batch_size=8, stage='autoflow', image_size=[488, 576], SINTEL_TRAIN_DS='C+T+K+S+H'):
     """ Create the data loader for the corresponding training set """
 
-    if args.stage == 'chairs':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.1, 'max_scale': 1.0, 
+    if stage == 'chairs':
+        aug_params = {'crop_size': image_size, 'min_scale': -0.1, 'max_scale': 1.0, 
                       'do_flip': True,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         train_dataset = FlyingChairs(aug_params, split='training')
     
-    elif args.stage == 'chairs2':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.1, 'max_scale': 1.0, 
+    elif stage == 'chairs2':
+        aug_params = {'crop_size': image_size, 'min_scale': -0.1, 'max_scale': 1.0, 
                       'do_flip': True,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         train_dataset = FlyingChairs2(aug_params, split='training')
     
-    elif args.stage == 'things':
+    elif stage == 'things':
         # For experiments to understand inborn vs. acquired robustness against image shifting, 
         # only do image shifting augmentation on Things.
         # Things is non-sparse. So only need to work on FlowAugmentor 
         # (no need to work on SparseFlowAugmentor).
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True,
+        aug_params = {'crop_size': image_size, 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         things_clean  = FlyingThings3D(aug_params, dstype='frames_cleanpass', split='training')
         things_final  = FlyingThings3D(aug_params, dstype='frames_finalpass', split='training')
         train_dataset = things_clean + things_final
 
-    elif args.stage == 'autoflow':
+    elif stage == 'autoflow':
         # autoflow image size: (488, 576)
         # minimal scale = 2**0.42 = 1.338. 576*1.338=770.6 > 768. Otherwise there'll be exceptions.
-        train_dataset = Autoflow({'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.8, 
+        train_dataset = Autoflow({'crop_size': image_size, 'min_scale': -0.2, 'max_scale': 0.8, 
                                   'spatial_aug_prob': 1, 'do_flip': True,
                                   'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas })
 
-    elif args.stage == 'sintel':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True,
+    elif stage == 'sintel':
+        aug_params = {'crop_size': image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         things_clean = FlyingThings3D(aug_params, dstype='frames_cleanpass')
         sintel_clean = MpiSintel(aug_params, split='training', dstype='clean')
@@ -600,60 +629,58 @@ def fetch_dataloader(args, SINTEL_TRAIN_DS='C+T+K+S+H'):
         viper = VIPER(aug_params, split='training')
 
         if SINTEL_TRAIN_DS == 'C+T+K+S+H':
-            kitti = KITTI({'crop_size': args.image_size, 'min_scale': -0.3, 'max_scale': 0.5, 'do_flip': True,
+            kitti = KITTI({'crop_size': image_size, 'min_scale': -0.3, 'max_scale': 0.5, 'do_flip': True,
                            'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas })
-            hd1k = HD1K({'crop_size': args.image_size, 'min_scale': -0.5, 'max_scale': 0.2, 'do_flip': True,
+            hd1k = HD1K({'crop_size': image_size, 'min_scale': -0.5, 'max_scale': 0.2, 'do_flip': True,
                          'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas })
             train_dataset = 100*sintel_clean + 100*sintel_final + 200*kitti + 5*hd1k + things_clean
 
         elif SINTEL_TRAIN_DS == 'C+T+K/S':
             train_dataset = 100*sintel_clean + 100*sintel_final + things_clean
 
-    elif args.stage == 'SKHTV':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True,
+    elif stage == 'SKHTV':
+        aug_params = {'crop_size': image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         things_clean = FlyingThings3D(aug_params, dstype='frames_cleanpass')
         sintel_clean = MpiSintel(aug_params, split='training', dstype='clean')
         sintel_final = MpiSintel(aug_params, split='training', dstype='final')
-        kitti = KITTI({'crop_size': args.image_size, 'min_scale': -0.3, 'max_scale': 0.5, 'do_flip': True,
+        kitti = KITTI({'crop_size': image_size, 'min_scale': -0.3, 'max_scale': 0.5, 'do_flip': True,
                        'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas })
-        hd1k = HD1K({'crop_size': args.image_size, 'min_scale': -0.5, 'max_scale': 0.2, 'do_flip': True,
+        hd1k = HD1K({'crop_size': image_size, 'min_scale': -0.5, 'max_scale': 0.2, 'do_flip': True,
                      'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas })
         viper = VIPER(aug_params, split='training')
         train_dataset = 100*sintel_clean + 100*sintel_final + 200*kitti + 5*hd1k + things_clean
     
-    elif args.stage == 'kitti':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.4, 'do_flip': False,
+    elif stage == 'kitti':
+        aug_params = {'crop_size': image_size, 'min_scale': -0.2, 'max_scale': 0.4, 'do_flip': False,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         train_dataset = KITTI(aug_params, split='training')
 
-    elif args.stage == 'kittitrain':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -0.2, 'max_scale': 0.4, 'do_flip': False,
+    elif stage == 'kittitrain':
+        aug_params = {'crop_size': image_size, 'min_scale': -0.2, 'max_scale': 0.4, 'do_flip': False,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         train_dataset = KITTITrain(aug_params, split='training')
 
-    elif args.stage == 'viper':
-        aug_params = {'crop_size': args.image_size, 'min_scale': -1, 'max_scale': -0.5, 
+    elif stage == 'viper':
+        aug_params = {'crop_size': image_size, 'min_scale': -1, 'max_scale': -0.5, 
                       'spatial_aug_prob': 1, 'do_flip': False,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
         train_dataset = VIPER(aug_params, split='training')
 
     if args.ddp:
         train_sampler = DistributedSampler(train_dataset, shuffle=True)
-        shuffle = False
         train_loader = data.DataLoader(train_dataset,
-                                       batch_size  = args.batch_size,
+                                       batch_size  = mini_batch_size,
                                        sampler     = train_sampler,
                                        pin_memory  = True,
-                                       shuffle     = shuffle,
                                        num_workers = args.num_workers,
                                        drop_last   = True)
     else:
-        train_sampler = None
         train_loader = data.DataLoader(train_dataset,
-                                       batch_size  = args.batch_size,
+                                       batch_size  = mini_batch_size,
                                        pin_memory  = True,
                                        num_workers = args.num_workers,
+                                       shuffle     = True,
                                        drop_last   = True)
 
     print0('Training with %d image pairs' % len(train_dataset))
