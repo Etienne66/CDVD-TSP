@@ -9,7 +9,10 @@ cv2.ocl.setUseOpenCL(False)
 
 import torch
 from torchvision.transforms import ColorJitter
+from torchvision.transforms import GaussianBlur
 import torch.nn.functional as F
+
+import torchvision.transforms.functional as trans
 
 # img1, img2 are 3D np arrays of (H, W, 3). flow is (H, W, 2).
 # shift_sigmas is (u, v), i.e., (W, H).
@@ -108,6 +111,7 @@ class FlowAugmentor:
 
         # photometric augmentation params
         self.photo_aug = ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14)
+        
         self.asymmetric_color_aug_prob = 0.2
         self.eraser_aug_prob = 0.5
 
@@ -119,14 +123,23 @@ class FlowAugmentor:
 
         # asymmetric
         if np.random.rand() < self.asymmetric_color_aug_prob:
-            img1 = np.array(self.photo_aug(Image.fromarray(img1)), dtype=np.uint8)
-            img2 = np.array(self.photo_aug(Image.fromarray(img2)), dtype=np.uint8)
+            if torch.is_tensor(img1):
+                img1 = self.photo_aug(img1)
+                img2 = self.photo_aug(img2)
+            else:
+                img1 = np.array(self.photo_aug(Image.fromarray(img1)), dtype=np.uint8)
+                img2 = np.array(self.photo_aug(Image.fromarray(img2)), dtype=np.uint8)
 
         # symmetric
         else:
-            image_stack = np.concatenate([img1, img2], axis=0)
-            image_stack = np.array(self.photo_aug(Image.fromarray(image_stack)), dtype=np.uint8)
-            img1, img2 = np.split(image_stack, 2, axis=0)
+            if torch.is_tensor(img1):
+                image_stack = torch.cat([img1, img2], dim=1)
+                image_stack = self.photo_aug(image_stack)
+                img1, img2 = torch.split(image_stack, split_size_or_sections=img1.shape[1], dim=1)
+            else:
+                image_stack = np.concatenate([img1, img2], axis=0)
+                image_stack = np.array(self.photo_aug(Image.fromarray(image_stack)), dtype=np.uint8)
+                img1, img2 = np.split(image_stack, 2, axis=0)
 
         return img1, img2
 
@@ -134,20 +147,30 @@ class FlowAugmentor:
         """ Occlusion augmentation """
 
         if np.random.rand() < self.eraser_aug_prob:
-            ht, wd = img1.shape[:2]
-            mean_color = np.mean(img2.reshape(-1, 3), axis=0)
+            if torch.is_tensor(img1):
+                ht, wd  = img1.shape[1:3]
+                mean_color = torch.mean(img2)
+            else:
+                ht, wd = img1.shape[:2]
+                mean_color = np.mean(img2.reshape(-1, 3), axis=0)
             for _ in range(np.random.randint(1, 3)):
                 x0 = np.random.randint(0, wd)
                 y0 = np.random.randint(0, ht)
                 dx = np.random.randint(bounds[0], bounds[1])
                 dy = np.random.randint(bounds[0], bounds[1])
-                img2[y0:y0+dy, x0:x0+dx, :] = mean_color
+                if torch.is_tensor(img2):
+                    img2[:, x0:x0+dx, y0:y0+dy] = mean_color
+                else:
+                    img2[y0:y0+dy, x0:x0+dx, :] = mean_color
 
         return img1, img2
 
     def spatial_transform(self, img1, img2, flow):
         # randomly sample scale
-        ht, wd = img1.shape[:2]
+        if torch.is_tensor(img1):
+            ht, wd = img1.shape[1:3]
+        else:
+            ht, wd = img1.shape[:2]
         min_scale = np.maximum(
             (self.crop_size[0] + 8) / float(ht), 
             (self.crop_size[1] + 8) / float(wd))
@@ -164,28 +187,54 @@ class FlowAugmentor:
 
         if np.random.rand() < self.spatial_aug_prob:
             # rescale the images
-            img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-            img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-            flow = cv2.resize(flow, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-            flow = flow * [scale_x, scale_y]
+            if torch.is_tensor(img1):
+                img1 = trans.resize(img1, size=[(ht*scale_y).astype(int), (wd*scale_x).astype(int)], interpolation=trans.InterpolationMode.BICUBIC)
+                img2 = trans.resize(img2, size=[(ht*scale_y).astype(int), (wd*scale_x).astype(int)], interpolation=trans.InterpolationMode.BICUBIC)
+                flow = trans.resize(flow, size=[(ht*scale_y).astype(int), (wd*scale_x).astype(int)], interpolation=trans.InterpolationMode.BICUBIC)
+                flow[0] *= scale_y
+                flow[1] *= scale_x
+            else:
+                img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
+                img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
+                flow = cv2.resize(flow, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
+                flow = flow * [scale_x, scale_y]
+            
 
         if self.do_flip:
             if np.random.rand() < self.h_flip_prob: # h-flip
-                img1 = img1[:, ::-1]
-                img2 = img2[:, ::-1]
-                flow = flow[:, ::-1] * [-1.0, 1.0]
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(2,))
+                    img2 = torch.flip(img2, dims=(2,))
+                    flow = torch.flip(flow, dims=(2,))
+                    flow[0] *= -1.0
+                else:
+                    img1 = img1[:, ::-1]
+                    img2 = img2[:, ::-1]
+                    flow = flow[:, ::-1] * [-1.0, 1.0]
 
             if np.random.rand() < self.v_flip_prob: # v-flip
-                img1 = img1[::-1, :]
-                img2 = img2[::-1, :]
-                flow = flow[::-1, :] * [1.0, -1.0]
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(1,))
+                    img2 = torch.flip(img2, dims=(1,))
+                    flow = torch.flip(flow, dims=(1,))
+                    flow[1] *= -1.0
+                else:
+                    img1 = img1[::-1, :]
+                    img2 = img2[::-1, :]
+                    flow = flow[::-1, :] * [1.0, -1.0]
 
-        y0 = np.random.randint(0, img1.shape[0] - self.crop_size[0])
-        x0 = np.random.randint(0, img1.shape[1] - self.crop_size[1])
-            
-        img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-        img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-        flow = flow[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+        if torch.is_tensor(img1):
+            y0 = np.random.randint(0, img1.shape[1] - self.crop_size[0])
+            x0 = np.random.randint(0, img1.shape[2] - self.crop_size[1])
+            img1 = img1[:, y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+            img2 = img2[:, y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+            flow = flow[:, y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+        else:
+            y0 = np.random.randint(0, img1.shape[0] - self.crop_size[0])
+            x0 = np.random.randint(0, img1.shape[1] - self.crop_size[1])
+            img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+            img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+            flow = flow[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
 
         return img1, img2, flow
         
@@ -200,12 +249,22 @@ class FlowAugmentor:
 
         if self.blur_sigma > 0:
             K = self.blur_kernel
-            img1 = cv2.GaussianBlur(img1, (K, K), self.blur_sigma)
-            img2 = cv2.GaussianBlur(img2, (K, K), self.blur_sigma)
+            if torch.is_tensor(img1):
+                gaussianblur = GaussianBlur(kernel_size=(K, K), sigma=self.blur_sigma)
+                img1 = gaussianblur(img1)
+                img2 = gaussianblur(img2)
+            else:
+                img1 = cv2.GaussianBlur(img1, (K, K), self.blur_sigma)
+                img2 = cv2.GaussianBlur(img2, (K, K), self.blur_sigma)
 
-        img1 = np.ascontiguousarray(img1)
-        img2 = np.ascontiguousarray(img2)
-        flow = np.ascontiguousarray(flow)
+        if torch.is_tensor(img1):
+            img1 = img1.contiguous()
+            img2 = img2.contiguous()
+            flow = flow.contiguous()
+        else:
+            img1 = np.ascontiguousarray(img1)
+            img2 = np.ascontiguousarray(img2)
+            flow = np.ascontiguousarray(flow)
 
         return img1, img2, flow, valid
 
