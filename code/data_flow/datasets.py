@@ -27,9 +27,10 @@ shift_info_printed = False
 
 # sparse: sparse (kitti .png) format of flow data
 class FlowDataset(data.Dataset):
-    def __init__(self, aug_params=None, sparse=False):
+    def __init__(self, aug_params=None, sparse=False, normalize=False):
         self.augmentor = None
         self.sparse = sparse
+        self.normalize = normalize
         if aug_params is not None:
             if sparse:
                 # Only KITTI, HD1k, VIPER are sparse.
@@ -58,13 +59,17 @@ class FlowDataset(data.Dataset):
             extra_info = self.extra_info[index]
         else:
             extra_info = 0
-        input_transform = transforms.Compose([
-            #flow_transforms.ArrayToTensor(),
-            transforms.Normalize(mean=[0, 0, 0], std=[255, 255, 255])#, # (0,255) -> (0,1)
-            #transforms.Normalize(mean=[0.45,0.432,0.411], std=[1,1,1]) # (0,1) -> (-0.5,0.5)
-            #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # from ImageNet dataset
-            #transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]) # Standard normalization
-        ])
+        if self.normalize:
+            input_transform = transforms.Compose([
+                transforms.Normalize(mean=[0, 0, 0], std=[255, 255, 255]), # (0,255) -> (0,1)
+                #transforms.Normalize(mean=[0.45,0.432,0.411], std=[1,1,1]) # (0,1) -> (-0.5,0.5)
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # from ImageNet dataset
+                #transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]) # Standard normalization
+            ])
+        else:
+            input_transform = transforms.Compose([
+                transforms.Normalize(mean=[0, 0, 0], std=[255, 255, 255])#, # (0,255) -> (0,1)
+            ])
         # if is_test, do not return flow (only for LB submission).
         # If there's groundtruth flow, then is_test=False, e.g. on chairs and things.
         if self.is_test:
@@ -89,10 +94,16 @@ class FlowDataset(data.Dataset):
         # KITTI flow is saved as image files. 
         # KITTI, HD1K, VIPER are sparse format.
         if self.sparse:
-            flow, valid = frame_utils.readFlowKITTI(self.flow_list[index])
+            if self.flow_list[index].suffix == '.npz':
+                flow, valid = frame_utils.readFlowNPZ(self.flow_list[index])
+            elif self.flow_list[index].suffix == '.png':
+                flow, valid = frame_utils.readFlowKITTI(self.flow_list[index])
         else:
             # read_gen: general read? choose reader according to the file extension.
-            flow = frame_utils.read_gen(self.flow_list[index])
+            if self.flow_list[index].suffix == '.npz':
+                flow, valid = frame_utils.readFlowNPZ(self.flow_list[index])
+            else:
+                flow = frame_utils.read_gen(self.flow_list[index])
 
         if self.occ_list is not None:
             occ = frame_utils.read_gen(self.occ_list[index])
@@ -155,15 +166,26 @@ class FlowDataset(data.Dataset):
                 #valid = (flow[0].abs() < 1000) & (flow[1].abs() < 1000)
                 flow_u = flow[0]
                 flow_v = flow[1]
+                h,w = flow_u.shape
                 invalid = torch.logical_or(torch.logical_or(torch.isnan(flow_u), torch.isnan(flow_v)),
                                            torch.logical_or(torch.isinf(flow_u), torch.isinf(flow_v)))
+                flow_u[invalid] = 0
+                flow_v[invalid] = 0
+                invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u) >= w, np.abs(flow_v) >= h))
                 valid = torch.logical_not(invalid)
             else:
                 #valid = (flow[0].abs() < 1000) & (flow[1].abs() < 1000)
                 flow_u = flow[0]
                 flow_v = flow[1]
+                h,w = flow_u.shape
                 invalid = np.logical_or(np.logical_or(np.isnan(flow_u), np.isnan(flow_v)),
                                         np.logical_or(np.isinf(flow_u), np.isinf(flow_v)))
+                flow_u[invalid] = 0
+                flow_v[invalid] = 0
+                # Things was getting GT maximum flows greater than 1100 and it was resulting in nan for EPE
+                # Viper was getting GT maximum flows greater than 65365 and it was resulting in nan for EPE
+                # A flow greater than h or w has gone out of view an impossible to calculate from just 2 images
+                invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u) >= w, np.abs(flow_v) >= h))
                 valid = np.logical_not(invalid)
         flow = torch.cat((flow, valid[None,:,:]), dim=0)
 
@@ -186,8 +208,14 @@ class FlowDataset(data.Dataset):
 
 
 class MpiSintel(FlowDataset):
-    def __init__(self, aug_params=None, split='training', root='datasets/MPI_Sintel', dstype='clean',
-                 occlusion=False, segmentation=False, debug=False):
+    def __init__(self,
+                 aug_params   = None,
+                 split        = 'training',
+                 root         = 'datasets/MPI_Sintel',
+                 dstype       = 'clean',
+                 occlusion    = False,
+                 segmentation = False,
+                 debug        = False):
         self.ds_name = f'sintel-{split}-{dstype}'
         super(MpiSintel, self).__init__(aug_params)
 
@@ -203,13 +231,13 @@ class MpiSintel(FlowDataset):
         if debug:
             self.extra_info = []
 
-        seg_root = osp.join(root, split, 'segmentation')
-        seg_inv_root = osp.join(root, split, 'segmentation_invalid')
         self.segmentation = segmentation
         self.occlusion = occlusion
         if self.occlusion:
             self.occ_list = []
         if self.segmentation:
+            seg_root = root / split / 'segmentation'
+            seg_inv_root = root / split / 'segmentation_invalid'
             self.seg_list = []
             self.seg_inv_list = []
 
@@ -259,17 +287,23 @@ class FlyingChairs(FlowDataset):
                 self.image_list += [ [images[2*i], images[2*i+1]] ]
 
         print(f"{self.ds_name}: {len(self.image_list)} image pairs.")
+        if len(self.image_list) == 0:
+            exit()
 
 class FlyingChairs2(FlowDataset):
-    def __init__(self, aug_params=None, split='training', root=Path('../datasets/FlyingChairs2')):
+    def __init__(self,
+                 aug_params = None,
+                 split      = 'training',
+                 root       = Path('../datasets/FlyingChairs2'),
+                 normalize  = False):
         self.ds_name = f'chairs2-{split}'
-        super(FlyingChairs2, self).__init__(aug_params)
+        super(FlyingChairs2, self).__init__(aug_params, normalize=normalize)
 
 
         if split == 'training':
             train_path = root / 'train'
             images = sorted(train_path.rglob('*img*.png'))
-            flows = sorted(train_path.rglob('*.flo'))
+            flows = sorted(train_path.rglob('*.npz'))
             assert (len(images) == len(flows))
             for i in range(len(flows)):
                 if flows[i].name.find('flow_01') > 0:
@@ -283,7 +317,7 @@ class FlyingChairs2(FlowDataset):
         else:
             val_path = root / 'val'
             images = sorted(val_path.rglob('*img*.png'))
-            flows = sorted(val_path.rglob('*.flo'))
+            flows = sorted(val_path.rglob('*.npz'))
             assert (len(images) == len(flows))
             for i in range(len(flows)):
                 if flows[i].name.find('flow_01') > 0:
@@ -297,66 +331,87 @@ class FlyingChairs2(FlowDataset):
         if len(self.image_list) == 0:
             exit()
 
+
+
 class FlyingThings3D(FlowDataset):
-    def __init__(self, aug_params=None, root=Path('../datasets/FlyingThings3D_subset'), split='training', dstype='image_final'):
+    def __init__(self,
+                 aug_params = None,
+                 root       = Path('../datasets/FlyingThings3D_subset'),
+                 split      = 'training',
+                 dstype     = 'image_final',
+                 normalize  = False):
         ds_type_short = { 'image_clean': 'clean', 
                           'image_final': 'final' }
         self.ds_name = f'things-{split}-{ds_type_short[dstype]}'
-        super(FlyingThings3D, self).__init__(aug_params)
+        super(FlyingThings3D, self).__init__(aug_params, normalize=normalize)
 
         if split == 'training':
             for cam in ['left','right']:
+                image_dir = root / 'train' / dstype / cam
+
                 for direction in ['into_future', 'into_past']:
-                    image_dirs = sorted(glob(osp.join(root, dstype, 'TRAIN/*/*')))
-                    image_dirs = sorted([osp.join(f, cam) for f in image_dirs])
+                #for direction in ['into_future']:
+                    flow_dir = root / 'train' / 'flow' / cam / direction
+                    for flow in sorted(flow_dir.rglob('*.npz')):
+                        index = int(flow.stem)
 
-                    flow_dirs = sorted(glob(osp.join(root, 'optical_flow/TRAIN/*/*')))
-                    flow_dirs = sorted([osp.join(f, direction, cam) for f in flow_dirs])
+                        if direction == 'into_future':
+                            img1 = str(index).zfill(7)+'.png'
+                            img2 = str(index+1).zfill(7)+'.png'
+                            img1_path = image_dir / img1
+                            img2_path = image_dir / img2
 
-                    for idir, fdir in zip(image_dirs, flow_dirs):
-                        images = sorted(glob(osp.join(idir, '*.png')) )
-                        # We converted pfm to flo to reduce half of the space.
-                        flows = sorted(glob(osp.join(fdir, '*.flo')) )
-                        if len(flows) == 0:
-                            flows = sorted(glob(osp.join(fdir, '*.pfm')) )
+                            if  img1_path.is_file() \
+                            and img2_path.is_file():
+                                self.image_list += [ [img1_path, img2_path] ]
+                                self.flow_list += [ flow ]
+                        elif direction == 'into_past':
+                            img1 = str(index).zfill(7)+'.png'
+                            img2 = str(index-1).zfill(7)+'.png'
+                            img1_path = image_dir / img1
+                            img2_path = image_dir / img2
 
-                        for i in range(len(flows)-1):
-                            if direction == 'into_future':
-                                self.image_list += [ [images[i], images[i+1]] ]
-                                self.flow_list += [ flows[i] ]
-                            elif direction == 'into_past':
-                                self.image_list += [ [images[i+1], images[i]] ]
-                                self.flow_list += [ flows[i+1] ]
+                            if  img1_path.is_file() \
+                            and img2_path.is_file():
+                                self.image_list += [ [img1_path, img2_path] ]
+                                self.flow_list += [ flow ]
 
         elif split == 'validation':
-            for cam in ['left']:
-                for direction in ['into_future', 'into_past']:
-                    image_dirs = sorted(glob(osp.join(root, dstype, 'TEST/*/*')))
-                    image_dirs = sorted([osp.join(f, cam) for f in image_dirs])
+            for cam in ['left','right']:
+                image_dir = root / 'val' / dstype / cam
 
-                    flow_dirs = sorted(glob(osp.join(root, 'optical_flow/TEST/*/*')))
-                    flow_dirs = sorted([osp.join(f, direction, cam) for f in flow_dirs])
+                #for direction in ['into_future', 'into_past']:
+                for direction in ['into_future']:
+                    flow_dir = root / 'train' / 'flow' / cam / direction
+                    for flow in sorted(flow_dir.rglob('*.flo')):
+                        index = int(flow.stem)
 
-                    for idir, fdir in zip(image_dirs, flow_dirs):
-                        images = sorted(glob(osp.join(idir, '*.png')))
-                        # We converted pfm to flo to reduce half of the space.
-                        flows = sorted(glob(osp.join(fdir, '*.flo')))
-                        if len(flows) == 0:
-                            flows = sorted(glob(osp.join(fdir, '*.pfm')))
+                        if direction == 'into_future':
+                            img1 = str(index).zfill(7)+'.png'
+                            img2 = str(index+1).zfill(7)+'.png'
+                            img1_path = image_dir / img1
+                            img2_path = image_dir / img2
 
-                        for i in range(len(flows) - 1):
-                            if direction == 'into_future':
-                                self.image_list += [[images[i], images[i + 1]]]
-                                self.flow_list += [flows[i]]
-                            elif direction == 'into_past':
-                                self.image_list += [[images[i + 1], images[i]]]
-                                self.flow_list += [flows[i + 1]]
+                            if  img1_path.is_file() \
+                            and img2_path.is_file():
+                                self.image_list += [ [img1_path, img2_path] ]
+                                self.flow_list += [ flow ]
+                        elif direction == 'into_past':
+                            img1 = str(index).zfill(7)+'.png'
+                            img2 = str(index-1).zfill(7)+'.png'
+                            img1_path = image_dir / img1
+                            img2_path = image_dir / img2
 
-                valid_list = np.loadtxt('things_val_test_set.txt', dtype=np.int32)
-                self.image_list = [self.image_list[ind] for ind, sel in enumerate(valid_list) if sel]
-                self.flow_list = [self.flow_list[ind] for ind, sel in enumerate(valid_list) if sel]
+                            if  img1_path.is_file() \
+                            and img2_path.is_file():
+                                self.image_list += [ [img1_path, img2_path] ]
+                                self.flow_list += [ flow ]
       
         print(f"{self.ds_name}: {len(self.image_list)} image pairs.")
+        if len(self.image_list) == 0:
+            exit()
+
+
 
 class KITTI(FlowDataset):
     def __init__(self, aug_params=None, split='training', root='datasets/KITTI',
@@ -442,10 +497,14 @@ class HD1K(FlowDataset):
         print(f"{self.ds_name}: {len(self.image_list)} image pairs.")
 
 class Autoflow(FlowDataset):
-    def __init__(self, aug_params=None, split='training', root=Path('../datasets/AutoFlow'),
-                 debug=False):
+    def __init__(self,
+                 aug_params = None,
+                 split      = 'training',
+                 root       = Path('../datasets/AutoFlow'),
+                 debug      = False,
+                 normalize  = False):
         self.ds_name = f'autoflow-{split}'
-        super(Autoflow, self).__init__(aug_params)
+        super(Autoflow, self).__init__(aug_params, normalize=normalize)
 
         scene_count = len(list(root.iterdir()))
         #training_size = int(scene_count * 0.9)
@@ -470,22 +529,28 @@ class Autoflow(FlowDataset):
 
 # The VIPER .npz flow files have been converted to KITTI .png format.
 class VIPER(FlowDataset):
-    def __init__(self, aug_params=None, split='training', root='datasets/viper/', filetype='jpg',
-                 debug=False):
+    def __init__(self,
+                 aug_params = None,
+                 split      = 'training',
+                 root       = Path('../datasets/VIPER/'),
+                 filetype   = 'png',
+                 debug      = False,
+                 modulo     = 10,
+                 normalize  = False):
         self.ds_name = f'viper-{split}'
-        super(VIPER, self).__init__(aug_params, sparse=True)
+        super(VIPER, self).__init__(aug_params, sparse=True, normalize=normalize)
 
         split_map = { 'training': 'train', 'validation': 'val', 'test': 'test' }
         split = split_map[split]
-        split_img_root  = osp.join(root, filetype, split, 'img')
-        split_flow_root = osp.join(root, filetype, split, 'flow')
+        split_img_root  = root / split / 'img'
+        split_flow_root = root / split / 'flow'
         skip_count = 0
         if debug:
             self.extra_info = []
 
         if split == 'test':
             # 001_00001, 001_00076, ...
-            TEST_FRAMES = open(osp.join(root, "test_frames.txt"))
+            TEST_FRAMES = open(root / "test_frames.txt")
             test_frames_dict = {}
             for frame_trunk in TEST_FRAMES:
                 frame_trunk = frame_trunk.strip()
@@ -493,37 +558,46 @@ class VIPER(FlowDataset):
             print0("{} test frame names loaded".format(len(test_frames_dict)))
             self.is_test = True
             
-        for i, scene in enumerate(sorted(os.listdir(split_img_root))):
+        for i, scene in enumerate(sorted(split_flow_root.iterdir())):
             # scene: 001, 002, ...
             # dir: viper/train/img/001
             # img0_name: 001_00001.png, 001_00010.png, ...
-            for img0_name in sorted(os.listdir(osp.join(split_img_root, scene))):
-                matches = re.match(r"(\d{3})_(\d{5}).(jpg|png)", img0_name)
-                if not matches:
-                    breakpoint()
+            for flow_path in sorted(scene.iterdir()):
+                #print('img0_name',img0_name.name)
+                matches = re.search(r"(\d{3})_(\d{5})(\.npz)", flow_path.name)
+                #if not matches:
+                #    breakpoint()
                 scene0   = matches.group(1)
-                img0_idx = matches.group(2)
+                flow_idx = matches.group(2)
                 suffix   = matches.group(3)
-                assert scene == scene0
-                # img0_trunk: img0_name without suffix.
-                img0_trunk  = f"{scene}_{img0_idx}"
-                if (split == 'train' or split == 'val') and img0_idx[-1] == '0' \
-                  or split == 'test' and img0_trunk in test_frames_dict:
-                    img1_idx    = "{:05d}".format(int(img0_idx) + 1)
-                    img1_name   = f"{scene}_{img1_idx}.{suffix}"
-                    flow_name   = img0_name[:-3] + "png"
-                    image0_path = osp.join(split_img_root,  scene, img0_name)
-                    image1_path = osp.join(split_img_root,  scene, img1_name)
-                    flow_path   = osp.join(split_flow_root, scene, flow_name)
+                assert scene.name == scene0
+                #print('suffix',suffix,'flow_path.suffix',flow_path.suffix)
+                assert suffix == flow_path.suffix
+                # img0_trunk: flow_path without suffix.
+                img0_trunk  = f"{scene0}_{flow_idx}"
+                if ((split == 'train' or split == 'val') and int(flow_idx) % modulo == 0) \
+                  or (split == 'test' and img0_trunk in test_frames_dict):
+                    img1_idx    = "{:05d}".format(int(flow_idx) + 1)
+                    img0_name   = f"{scene0}_{flow_idx}.{filetype}"
+                    img1_name   = f"{scene0}_{img1_idx}.{filetype}"
+                    #flow_name   = flow_path.stem + "." + filetype
+                    image0_path = split_img_root / scene0 / img0_name
+                    image1_path = split_img_root / scene0 / img1_name
+                    #flow_path   = split_flow_root / scene0 / flow_name
                     # Sometimes image1 is missing. Skip this pair.
-                    if not os.path.isfile(image1_path):
-                        # In the test set, image1 should always be there.
-                        if split == 'test':
-                            breakpoint()
+                    #if not os.path.isfile(image1_path):
+                    if not image0_path.is_file():
+                        #print('does not exist:',image0_path,' for ',flow_path)
+                        skip_count += 1
+                        continue
+                    if not image1_path.is_file():
+                        #print('does not exist:',image1_path,' for ',flow_path)
                         skip_count += 1
                         continue
                     # if both image0_path and image1_path exist, then flow_path should exist.
-                    if split != 'test' and not os.path.isfile(flow_path):
+                    #if split != 'test' and not os.path.isfile(flow_path):
+                    if split != 'test' and not flow_path.is_file():
+                        print('does not exist:',flow_path)
                         skip_count += 1
                         continue
                 # This file is not considered as the first frame. Skip.
@@ -557,15 +631,15 @@ class SlowFlow(FlowDataset):
             # img0_name: seq5_0000000.png, seq5_0000001.png, ...
             for img0_name in sorted(os.listdir(osp.join(sequence_root, scene))):
                 matches = re.match(r"seq(\d+)_(\d+).png", img0_name)
-                if not matches:
-                    breakpoint()
+                #if not matches:
+                #    breakpoint()
                 subseq_idx  = matches.group(1)
                 img0_idx    = matches.group(2)
                 # This image is img1. Skip.
                 if img0_idx[-1] == '1':
                     continue
-                if img0_idx[-1] != '0':
-                    breakpoint()
+                #if img0_idx[-1] != '0':
+                #    breakpoint()
                 # img0_trunk: img0_name without suffix.
                 img0_trunk  = f"seq{subseq_idx}_{img0_idx}"
                 img1_idx    = img0_idx[:-1] + '1'
@@ -600,7 +674,7 @@ def fetch_dataloader(args, mini_batch_size=8, stage='autoflow', image_size=[488,
         aug_params = {'crop_size': image_size, 'min_scale': -0.1, 'max_scale': 1.0, 
                       'do_flip': True,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
-        train_dataset = FlyingChairs2(aug_params, split='training')
+        train_dataset = FlyingChairs2(aug_params, split='training', normalize=args.normalize)
     
     elif stage == 'things':
         # For experiments to understand inborn vs. acquired robustness against image shifting, 
@@ -609,16 +683,36 @@ def fetch_dataloader(args, mini_batch_size=8, stage='autoflow', image_size=[488,
         # (no need to work on SparseFlowAugmentor).
         aug_params = {'crop_size': image_size, 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
-        things_clean  = FlyingThings3D(aug_params, dstype='frames_cleanpass', split='training')
-        things_final  = FlyingThings3D(aug_params, dstype='frames_finalpass', split='training')
+        things_clean  = FlyingThings3D(aug_params, dstype='image_clean', split='training', normalize=args.normalize)
+        things_final  = FlyingThings3D(aug_params, dstype='image_final', split='training', normalize=args.normalize)
         train_dataset = things_clean + things_final
+
+    elif stage == 'things_clean':
+        # For experiments to understand inborn vs. acquired robustness against image shifting, 
+        # only do image shifting augmentation on Things.
+        # Things is non-sparse. So only need to work on FlowAugmentor 
+        # (no need to work on SparseFlowAugmentor).
+        aug_params = {'crop_size': image_size, 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True,
+                      'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
+        things_clean  = FlyingThings3D(aug_params, dstype='image_clean', split='training', normalize=args.normalize)
+        train_dataset = things_clean
+
+    elif stage == 'things_final':
+        # For experiments to understand inborn vs. acquired robustness against image shifting, 
+        # only do image shifting augmentation on Things.
+        # Things is non-sparse. So only need to work on FlowAugmentor 
+        # (no need to work on SparseFlowAugmentor).
+        aug_params = {'crop_size': image_size, 'min_scale': -0.4, 'max_scale': 0.8, 'do_flip': True,
+                      'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
+        things_final  = FlyingThings3D(aug_params, dstype='image_final', split='training', normalize=args.normalize)
+        train_dataset = things_final
 
     elif stage == 'autoflow':
         # autoflow image size: (488, 576)
         # minimal scale = 2**0.42 = 1.338. 576*1.338=770.6 > 768. Otherwise there'll be exceptions.
         train_dataset = Autoflow({'crop_size': image_size, 'min_scale': -0.2, 'max_scale': 0.8, 
                                   'spatial_aug_prob': 1, 'do_flip': True,
-                                  'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas })
+                                  'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }, normalize=args.normalize)
 
     elif stage == 'sintel':
         aug_params = {'crop_size': image_size, 'min_scale': -0.2, 'max_scale': 0.6, 'do_flip': True,
@@ -665,7 +759,20 @@ def fetch_dataloader(args, mini_batch_size=8, stage='autoflow', image_size=[488,
         aug_params = {'crop_size': image_size, 'min_scale': -1, 'max_scale': -0.5, 
                       'spatial_aug_prob': 1, 'do_flip': False,
                       'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
-        train_dataset = VIPER(aug_params, split='training')
+        train_dataset = VIPER(aug_params, split='training', normalize=args.normalize)
+        #train_dataset = VIPER(aug_params, split='training', modulo=3, normalize=args.normalize)
+
+    elif stage == 'viper1':
+        aug_params = {'crop_size': image_size, 'min_scale': -1, 'max_scale': -0.5, 
+                      'spatial_aug_prob': 1, 'do_flip': False,
+                      'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
+        train_dataset = VIPER(aug_params, split='training', modulo=1, normalize=args.normalize)
+
+    elif stage == 'viper3':
+        aug_params = {'crop_size': image_size, 'min_scale': -1, 'max_scale': -0.5, 
+                      'spatial_aug_prob': 1, 'do_flip': False,
+                      'shift_prob': args.shift_aug_prob, 'shift_sigmas': args.shift_sigmas }
+        train_dataset = VIPER(aug_params, split='training', modulo=3, normalize=args.normalize)
 
     if args.ddp:
         train_sampler = DistributedSampler(train_dataset, shuffle=True)
@@ -676,6 +783,7 @@ def fetch_dataloader(args, mini_batch_size=8, stage='autoflow', image_size=[488,
                                        num_workers = args.num_workers,
                                        drop_last   = True)
     else:
+        #print('mini_batch_size',mini_batch_size,'args.num_workers',args.num_workers)
         train_loader = data.DataLoader(train_dataset,
                                        batch_size  = mini_batch_size,
                                        pin_memory  = True,

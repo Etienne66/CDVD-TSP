@@ -12,10 +12,14 @@ class Stream:
 # end
 
 @cupy.memoize(for_each_device=True)
-def cupy_launch():
+def cupy_launch(mixed_precision=False):
     global kernel_Correlation_rearrange, kernel_Correlation_updateOutput
     global kernel_Correlation_updateGradFirst, kernel_Correlation_updateGradSecond
-    module = cupy.RawModule(code=Path('./model_flows/correlation.32.cu').read_text())
+    #if mixed_precision:
+    if False:
+        module = cupy.RawModule(code=Path('./model_flows/correlation.16.cu').read_text())
+    else:
+        module = cupy.RawModule(code=Path('./model_flows/correlation.32.cu').read_text())
     kernel_Correlation_rearrange = module.get_function('kernel_Correlation_rearrange')
     kernel_Correlation_updateOutput = module.get_function('kernel_Correlation_updateOutput')
     kernel_Correlation_updateGradFirst = module.get_function('kernel_Correlation_updateGradFirst')
@@ -29,6 +33,7 @@ class _FunctionCorrelation(torch.autograd.Function):
     
     """
     @staticmethod
+    #@torch.cuda.amp.custom_fwd
     @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
     def forward(self,
                 first,
@@ -181,7 +186,8 @@ class ModuleCorrelation(torch.nn.Module):
                  max_displacement = 4,
                  stride1 = 1,
                  stride2 = 1,
-                 device = 'cuda'):
+                 device = 'cuda',
+                 mixed_precision = False):
         super(ModuleCorrelation, self).__init__()
         global gpadding, gkernel_size, gmax_displacement, gstride1, gstride2, gdevice
         gpadding = padding
@@ -193,7 +199,7 @@ class ModuleCorrelation(torch.nn.Module):
         grid_radius = max_displacement / stride2; #4
         grid_width = grid_radius * 2 + 1; #9
         out_channels = grid_width * grid_width; #81
-        cupy_launch()
+        cupy_launch(mixed_precision = mixed_precision)
         
         #self.FunctionCorrelation = _FunctionCorrelation()
     # end__init__

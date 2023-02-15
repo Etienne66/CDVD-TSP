@@ -57,9 +57,9 @@ parser.add_argument('--save_path', type=Path, default='../runs',
 parser.add_argument('--dataset', metavar='DATASET', default='autoflow', #flying_things_both flying_chairs2 flying_things_final flying_things_clean
                     choices=dataset_names,# nargs='*',
                     help='dataset type: ' + ' | '.join(dataset_names))
-parser.add_argument('--datasets', metavar='DATASET', default=['autoflow','chairs2','things','viper'], #flying_things_both flying_chairs2 flying_things_final flying_things_clean
-                    choices=dataset_names,# nargs='*',
-                    help='dataset type: ' + ' | '.join(dataset_names))
+parser.add_argument('--datasets', metavar='DATASET', default=['autoflow','chairs2','things_final','viper3'], #flying_things_both flying_chairs2 flying_things_final flying_things_clean
+                    choices=['autoflow','chairs2','things','things_clean','things_final','viper','viper3','viper1'], nargs='+',
+                    help='dataset type: ' + ' | '.join(['autoflow','chairs2','things','things_clean','viper']))
 parser.add_argument('--testdataset', metavar='DATASET', default='mpi_sintel_final', #mpi_sintel_final mpi_sintel_clean KITTI_2015_occ
                     choices=dataset_names,
                     help='dataset type: ' + ' | '.join(dataset_names))
@@ -71,29 +71,32 @@ parser.add_argument('--n_GPUs', type=int, default=1, metavar='N',
 parser.add_argument('-j', '--num_workers', default=4, type=int, metavar='N',
                     help='number of data loading workers. Set to number of cpus')
 parser.add_argument('-b', '--batch_size', dest='batch_size', default=32, type=int, #22
+                    choices=[1,2,4,8,16,32,64,128],
                     metavar='N', help='mini-batch size')
-parser.add_argument('--mini_batch_sizes', dest='batch_size', default=[32,32,32,16], type=int, #22
-                    metavar='N', help='mini-batch size')
-
-parser.add_argument('--test_batch_size', default=6, type=int, #6
+parser.add_argument('--test_batch_size', default=4, type=int, #6
                     metavar='N', help='mini-batch size')
 parser.add_argument('--epochs', default=300, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--num_steps', default=6_200_000, type=int, metavar='N',
-                    help='number of total epochs to run')
-parser.add_argument('--accumulation_steps', type=int, default=2,
+                    help='number of total steps to run')
+parser.add_argument('--max_num_steps', default=0, type=int, metavar='N',
+                    help='step number to stop run')
+parser.add_argument('--accumulation_steps', type=int, default=1,
                     help='True_Batch_Size = accumalation_steps * batch_size')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--epoch_size', default=0, type=int, metavar='N',
                     help='manual epoch size (will match dataset size if set to 0)')
-parser.add_argument('--epoch_sizes', default=[40000,43200,76800,12800], type=int, metavar='N',
-                    help='manual epoch size (will match dataset size if set to 0)')
+                                             # autoflow,chairs2,things,viper
+#parser.add_argument('--epoch_sizes', default=[1250,1388,9820,3328], type=int, metavar='N', # 40000,44464,39280,13356  78564->39280
+#                    help='manual epoch size (will match dataset size if set to 0)')
 parser.add_argument('--test_epoch_size', default=0, type=int, metavar='N',
                     help='manual epoch size (will match dataset size if set to 0)')
 parser.add_argument('--print_freq', '-p', default=200, type=int,
                     metavar='N', help='print frequency')
 parser.add_argument('--val_freq', type=int, default=5000,
+                    help='validation frequency')
+parser.add_argument('--max_dataset_len', type=int, default=1_000_000,
                     help='validation frequency')
 parser.add_argument('--image_freq', default=60, type=int,
                     metavar='N', help='test image frequency')
@@ -101,18 +104,29 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--no_date', action='store_true',
                     help='don\'t append date timestamp to folder' )
-parser.add_argument('--div_flow', type=int, default=1, metavar='N', choices=[1,16,20,256,512,1024],
+parser.add_argument('--div_flow', type=int, default=1, metavar='N',
+                    choices=[1,16,20,32,256,512,1024,2048,4096],
                     help='value by which flow will be divided. Original value is 20 but 1 with batchNorm gives good results')
 parser.add_argument('--batchnorm', action='store_true',
                     help='use torch.nn.BatchNorm2d after torch.nn.Conv2d')
+parser.add_argument('--normalize', action='store_true',
+                    help='use Normalize images')
+parser.add_argument('--large_motion', action='store_true',
+                    help='Change to increase channels for flow 4,5,6 to better detect large motions')
+parser.add_argument('--useFlow1', action='store_true', help='use flow 1 as the final stage instead of flow 2')
+parser.add_argument('--useResidual', action='store_true', help='use residual features in optical flow estimator')
+parser.add_argument('--useDenseNet', action='store_true', help='use DenseNet in optical flow estimator')
+parser.add_argument('--useContext', action='store_true', help='use context network to refine flow 2')
+parser.add_argument('--max_displacement', type=int, default=4, metavar='N',
+                    help='search range for correlation function')
 parser.add_argument('--Crop_Size', type=int, default=None, metavar='N', nargs=2,
                     help='Size of random Crop. H W')
-parser.add_argument('--loss', default='0*mWAUCl+1*mEPE', type=str, metavar='LOSS',
-                    choices=['0*mWAUCl+0*mEPE+1*mL2','.1*mWAUCl+.7*mEPE',
-                             '0*mWAUCl+1*mEPE','.1*mWAUCl+2*mEPE','1*mWAUCl+0*mEPE',
-                             '1*mWAUCl+2*mEPE','1*mWAUCl+2*mEPE1'],
+parser.add_argument('--loss', default='0*mWAUCl+1*mEPE', type=str,
+                    choices=['0*mWAUCl+1*mEPE1','0*mWAUCl+1*mEPE',
+                             '1*mWAUCl+2*mEPE1','1*mWAUCl+2*mEPE',
+                             '1*mWAUCl+1*mEPE1','1*mWAUCl+1*mEPE'],
                     help='Loss function. EPE = Average endpoint error; Fl = Percentage of optical flow outliers from 0 to 100 percent')
-parser.add_argument('--weights', type=float, nargs='+', default=[0, 1, 0.5, 0.25, 0.25, 0.25]) #[1, 0.5, 0.25, 0.25, 0.25, 0.25]
+parser.add_argument('--weights', type=float, nargs='+', default=None) #[1, 0.5, 0.25, 0.25, 0.25, 0.25]
 
 parser.add_argument('--rgb_range', type=int, default=1,
                     help='maximum value of RGB')
@@ -123,22 +137,22 @@ parser.add_argument('--split_losses', action='store_true',
 parser.add_argument('--clip', type=float, default=0.5, help='gradient clipping')
 parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
 parser.add_argument('--use_checkpoint', action='store_true', help='use checkpoint')
-parser.add_argument('--use_flow1', action='store_true', help='use flow 1 as the final stage instead of flow 2')
 
 AugmenterGroup = parser.add_argument_group('Augmenter', description='Augmenter options')
 #AugmenterGroup.add_argument('--stage', type=str, default='autoflow',
 #                    help="determines which dataset to use for training")
-AugmenterGroup.add_argument('--image_size', type=int, nargs='+', default=[488, 576])
-AugmenterGroup.add_argument('--image_sizes', type=int, nargs='+', default=[[488, 576],[512,384],[960, 512],[1920, 1024]])
+AugmenterGroup.add_argument('--image_size', type=int, nargs='+'#, default=[488, 576]
+                            )
 AugmenterGroup.add_argument('--shiftprob', dest='shift_aug_prob', type=float, default=0.0,
                     help='Probability of shifting augmentation')
 AugmenterGroup.add_argument('--shiftsigmas', dest='shift_sigmas', default="16,10", type=str,
                     help='Stds of shifts for shifting consistency loss')
 
 OptimizerGroup = parser.add_argument_group('Optimizer', description='Optimizer options')
-OptimizerGroup.add_argument('--solver', default='adamw',choices=['adam','adamw','sgd'],
+OptimizerGroup.add_argument('--solver', default='adamw', type=str,
+                    choices=['adam','adamw','sgd'],
                     help='solver algorithms')
-OptimizerGroup.add_argument('--lr', '--learning-rate', default=2.5e-4, type=float, metavar='LR',
+OptimizerGroup.add_argument('--lr', '--learning-rate', default=1.0e-7, type=float, metavar='LR',
                     help='initial learning rate')
 OptimizerGroup.add_argument('--max_lr', default=2.5e-4, type=float, metavar='M',
                     help='Sets maximum Learning Rate for LRFinder, OneCycleLR, and CyclicLr')
@@ -158,11 +172,11 @@ SchedulerGroup = parser.add_argument_group('Scheduler', description='Scheduler o
 SchedulerGroup.add_argument('--scheduler', default='OneCycle',
                     choices=['multisteplr','steplr','onecyclelr','OneCycle','cycliclr','lr_finder'],
                     help='scheduler algorithms')
-SchedulerGroup.add_argument('--step_size_up', type=int, default=0, metavar='N',  #337
+SchedulerGroup.add_argument('--step_size_up', type=int, default=5_000, metavar='N',  #337
                     help='Number of training iterations in the increasing half of a cycle.')
 SchedulerGroup.add_argument('--gamma', type=float, default=0.5, metavar='M',
                     help='learning rate decay factor for step decay')
-SchedulerGroup.add_argument('--CyclicLR_gamma', type=float, default=0.99999826713355001493796951419198, metavar='M',
+SchedulerGroup.add_argument('--CyclicLR_gamma', type=float, default=0.9999930685522169957388034152483, metavar='M',
                     help='learning rate decay factor for step decay')
 SchedulerGroup.add_argument('--CyclicLR_mode', type=str, default='exp_range',
                     choices=['triangular','triangular2','exp_range'],
@@ -173,16 +187,17 @@ SchedulerGroup.add_argument('--lr_finder_Leslie_Smith', action='store_true',
                     help='Run the LRFinder using Leslie Smith''s approach')
 OptimizerGroup.add_argument('--pct_start', default=0.10, type=float, metavar='M',
                     help='pct_start for OneCycle')
+OptimizerGroup.add_argument('--anneal_strategy', default='linear', type=str,
+                    choices=['cos','linear'],
+                    help='anneal_strategy for OneCycle')
+
 
 batch_time = AverageMeter()
 data_time = AverageMeter()
 losses = AverageMeter()
-flow1_Fls = AverageMeter()
-flow2_Fls = AverageMeter()
-flow1_EPEs = AverageMeter()
-flow2_EPEs = AverageMeter()
-flow1_WAUCs = AverageMeter()
-flow2_WAUCs = AverageMeter()
+flow_Fls = AverageMeter()
+flow_EPEs = AverageMeter()
+flow_WAUCs = AverageMeter()
 flow1_WAUC = AverageMeter()
 flow2_WAUC = AverageMeter()
 flow3_WAUC = AverageMeter()
@@ -221,10 +236,13 @@ def main():
     args.best_WAUC = -1
     args.load = None #Used by loss module
     args.n_channel=2
-    args.normalize = True
-    args.mini_batch_size = int(args.batch_size / args.accumulation_steps)
+    #args.normalize = True
+    #args.mini_batch_size = int(args.batch_size / args.accumulation_steps)
     args.step_size = int(args.batch_size / 8) # Size of the original author's batch size
-    #args.batchnorm = True
+
+    if args.max_num_steps == 0:
+        args.max_num_steps = args.num_steps
+
     if args.pretrained:
         network_data = torch.load('../pretrain_models' / args.pretrained, map_location=torch.device(args.device))
         save_path = args.save_path
@@ -233,22 +251,27 @@ def main():
             args.arch = 'flow_pwc'
             args.div_flow = 20
             args.batchnorm = False
+            args.large_motion = False
+            args.useFlow1 = False
+            args.normalize = False
         elif 'args' in network_data.keys():
-            args = network_data['args']
-            #Don't use state_dict for scheduler and optimizer because this is not a resume
-            network_data.pop('optimizer_state_dict')
-            network_data.pop('scheduler_state_dict')
-
-            # Reset device in case the model was saved with a different device
+            old_args = network_data['args']
+            args.arch = old_args.arch
+            args.large_motion = old_args.large_motion
+            args.normalize = old_args.normalize
+            args.batchnorm = old_args.batchnorm
+            args.useFlow1 = old_args.useFlow1
+            args.max_displacement = old_args.max_displacement
+            
+            ##Don't use state_dict for scheduler and optimizer because this is not a resume
+            #if 'optimizer_state_dict' in network_data.keys(): network_data.pop('optimizer_state_dict')
+            #if 'scheduler_state_dict' in network_data.keys(): network_data.pop('scheduler_state_dict')
+            #
+            ## Reset device in case the model was saved with a different device
             args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            args.save_path = save_path
-            args.start_epoch = 0
-            args.n_iter = 0
-
-            # Reset random number generators
-            torch.set_rng_state(network_data['rng_state'].type(torch.ByteTensor))
-            random.setstate(network_data['random_state'])
-            np.random.set_state(network_data['numpy_random_state'])
+            #args.save_path = save_path
+            #args.start_epoch = 0
+            #args.n_iter = 0
         if args.evaluate:
             args.run_path = Path(args.arch + '-' + datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S") + '-PreTrained-Eval')
         else:
@@ -258,6 +281,7 @@ def main():
         # Save resume and epochs to restore after loading
         resume = args.resume
         epochs = args.epochs
+        max_num_steps = args.max_num_steps
         pct_start = args.pct_start
         num_workers = args.num_workers
         network_data = torch.load(args.save_path / args.resume, map_location=torch.device(args.device))
@@ -266,11 +290,29 @@ def main():
         args.resume = resume
         args.epochs = epochs
         args.num_workers = num_workers
+        args.max_num_steps = max_num_steps
         if args.pct_start is None:
             args.pct_start = pct_start
 
         # Reset device in case the model was saved with a different device
         args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Reset flow counts to continues after a resume
+        if args.flow_EPE_Count > 0: flow_EPEs.update(args.flow_EPE_Avg, args.flow_EPE_Count)
+        if args.flow_F1_Count > 0: flow_Fls.update(args.flow_F1_Avg, args.flow_F1_Count)
+        if args.flow_WAUC_Count > 0: flow_WAUCs.update(args.flow_WAUC_Avg, args.flow_WAUC_Count)
+        if args.flow1_WAUC_Count > 0: flow1_WAUC.update(args.flow1_WAUC_Avg, args.flow1_WAUC_Count)
+        if args.flow2_WAUC_Count > 0: flow2_WAUC.update(args.flow2_WAUC_Avg, args.flow2_WAUC_Count)
+        if args.flow3_WAUC_Count > 0: flow3_WAUC.update(args.flow3_WAUC_Avg, args.flow3_WAUC_Count)
+        if args.flow4_WAUC_Count > 0: flow4_WAUC.update(args.flow4_WAUC_Avg, args.flow4_WAUC_Count)
+        if args.flow5_WAUC_Count > 0: flow5_WAUC.update(args.flow5_WAUC_Avg, args.flow5_WAUC_Count)
+        if args.flow6_WAUC_Count > 0: flow6_WAUC.update(args.flow6_WAUC_Avg, args.flow6_WAUC_Count)
+        if args.flow1_EPE_Count > 0: flow1_EPE.update(args.flow1_EPE_Avg, args.flow1_EPE_Count)
+        if args.flow2_EPE_Count > 0: flow2_EPE.update(args.flow2_EPE_Avg, args.flow2_EPE_Count)
+        if args.flow3_EPE_Count > 0: flow3_EPE.update(args.flow3_EPE_Avg, args.flow3_EPE_Count)
+        if args.flow4_EPE_Count > 0: flow4_EPE.update(args.flow4_EPE_Avg, args.flow4_EPE_Count)
+        if args.flow5_EPE_Count > 0: flow5_EPE.update(args.flow5_EPE_Avg, args.flow5_EPE_Count)
+        if args.flow6_EPE_Count > 0: flow6_EPE.update(args.flow6_EPE_Avg, args.flow6_EPE_Count)
 
         # Reset random number generators
         torch.set_rng_state(network_data['rng_state'].type(torch.ByteTensor))
@@ -295,9 +337,9 @@ def main():
         np.random.seed(args.seed)
 
     # Data loading code
-    # tranforms.normalize output[channel] = (input[channel] - mean[channel]) / std[channel]
+    # transforms.Normalize output[channel] = (input[channel] - mean[channel]) / std[channel]
     # All channels are RGB. Loads from OpenCV were corrected
-    if False: #args.batchnorm:
+    if args.normalize:
         input_transform = transforms.Compose([
             flow_transforms.ArrayToTensor(),
             transforms.Normalize(mean=[0, 0, 0], std=[255, 255, 255]), # (0,255) -> (0,1)
@@ -362,23 +404,112 @@ def main():
     #    pin_memory=True,
     #    shuffle=True)
     print("=> fetching train image pairs in '{}\{}'".format(args.data,args.dataset))
-    train_loader = datasets.fetch_dataloader(args,
-                                             image_size      = args.image_size,
-                                             mini_batch_size = args.mini_batch_size,
-                                             stage           = args.dataset)
     
-    #for i in range(len(args.datasets)):
-    #    train_loaders.append = datasets.fetch_dataloader(args,
-    #                                                     image_size      = args.image_sizes[i],
-    #                                                     mini_batch_size = args.mini_batch_sizes[i],
-    #                                                     stage           = args.datasets[i])
-    
+    #train_loader = datasets.fetch_dataloader(args,
+    #                                         image_size      = args.image_size,
+    #                                         mini_batch_size = args.mini_batch_size,
+    #                                         stage           = args.dataset)
+
+    if args.image_size is not None:
+        image_sizes = {
+            "autoflow"      : [min(448, args.image_size[0]), min(576, args.image_size[1])],
+            "chairs2"       : [min(384, args.image_size[0]), min(512, args.image_size[1])],
+            "things"        : [min(512, args.image_size[0]), min(960, args.image_size[1])],
+            "things_clean"  : [min(512, args.image_size[0]), min(960, args.image_size[1])],
+            "things_final"  : [min(512, args.image_size[0]), min(960, args.image_size[1])],
+            "viper"         : [min(1024, args.image_size[0]), min(1920, args.image_size[1])],
+            "viper1"        : [min(1024, args.image_size[0]), min(1920, args.image_size[1])],
+            "viper3"        : [min(1024, args.image_size[0]), min(1920, args.image_size[1])]
+        }
+    else:
+        image_sizes = {
+            "autoflow"      : [ 448, 576], #258k
+            "chairs2"       : [ 384, 512], #197k
+            "things"        : [ 512, 960], #492k
+            "things_clean"  : [ 512, 960], #492k
+            "things_final"  : [ 512, 960], #492k
+            "viper"         : [1024,1920], #1966k
+            "viper1"        : [1024,1920], #1966k
+            "viper3"        : [1024,1920]  #1966k
+        }
+
+    if args.useFlow1 and args.useDenseNet and (args.useResidual or args.useContext):
+        mini_batch_sizes = {
+            "autoflow"      : min(4,args.batch_size),
+            "chairs2"       : min(8,args.batch_size),
+            "things"        : min(4,args.batch_size),
+            "things_clean"  : min(4,args.batch_size),
+            "things_final"  : min(4,args.batch_size),
+            "viper"         : min(2,args.batch_size),
+            "viper1"        : min(2,args.batch_size),
+            "viper3"        : min(2,args.batch_size)
+        }
+    elif args.useFlow1 and (args.useResidual or args.useContext):
+        mini_batch_sizes = {
+            "autoflow"      : min(16,args.batch_size),
+            "chairs2"       : min(16,args.batch_size),
+            "things"        : min(8,args.batch_size),
+            "things_clean"  : min(8,args.batch_size),
+            "things_final"  : min(8,args.batch_size),
+            "viper"         : min(4,args.batch_size),
+            "viper1"        : min(4,args.batch_size),
+            "viper3"        : min(4,args.batch_size)
+        }
+    elif args.useFlow1 and args.batchnorm:
+        mini_batch_sizes = {
+            "autoflow"      : min(16,args.batch_size),
+            "chairs2"       : min(32,args.batch_size),
+            "things"        : min(8,args.batch_size),
+            "things_clean"  : min(8,args.batch_size),
+            "things_final"  : min(8,args.batch_size),
+            "viper"         : min(2,args.batch_size),
+            "viper1"        : min(2,args.batch_size),
+            "viper3"        : min(2,args.batch_size)
+        }
+    elif args.image_size is not None and args.image_size[0] <= 704 and args.image_size[1] <= 1280 :
+        mini_batch_sizes = {
+            "autoflow"      : min(32,args.batch_size),
+            "chairs2"       : min(32,args.batch_size),
+            "things"        : min(16,args.batch_size),
+            "things_clean"  : min(16,args.batch_size),
+            "things_final"  : min(16,args.batch_size),
+            "viper"         : min(8,args.batch_size),
+            "viper1"        : min(8,args.batch_size),
+            "viper3"        : min(8,args.batch_size)
+        }
+    else:
+        mini_batch_sizes = {
+            "autoflow"      : min(16,args.batch_size),
+            "chairs2"       : min(32,args.batch_size),
+            "things"        : min(16,args.batch_size),
+            "things_clean"  : min(16,args.batch_size),
+            "things_final"  : min(16,args.batch_size),
+            "viper"         : min(4,args.batch_size),
+            "viper1"        : min(4,args.batch_size),
+            "viper3"        : min(4,args.batch_size)
+        }
+    print('mini_batch_sizes["autoflow"]', mini_batch_sizes["autoflow"])
+    train_loaders = {}
+    epoch_sizes = {}
+    train_loader_len = 0
+    for i in range(len(args.datasets)):
+        train_loaders[args.datasets[i]] = datasets.fetch_dataloader(args,
+                                                                    image_size      = image_sizes[args.datasets[i]],
+                                                                    mini_batch_size = mini_batch_sizes[args.datasets[i]],
+                                                                    stage           = args.datasets[i])
+        dataset_len = len(train_loaders[args.datasets[i]].dataset)
+        if dataset_len > args.max_dataset_len:
+            dataset_len = args.max_dataset_len
+        train_loader_len += dataset_len
+        epoch_sizes[args.datasets[i]] = math.floor(math.floor(dataset_len/args.batch_size) \
+                                        * args.batch_size/mini_batch_sizes[args.datasets[i]])
+
     print("=> fetching test image pairs in '{}\{}'".format(args.data,args.testdataset))
     test_set = data_flow.__dict__[args.testdataset](
         args.data,
         transform=input_transform,
         target_transform=target_transform,
-        co_transform=None#co_validate_transform
+        co_transform=None #co_validate_transform
     )
     val_loader = torch.utils.data.DataLoader(
         test_set,
@@ -390,17 +521,26 @@ def main():
     #print('{} samples found, {} train samples and {} test samples '.format(len(test_set)+len(train_set),
     #                                                                       len(train_set),
     #                                                                       len(test_set)))
-    print('{} samples found, {} train samples and {} test samples '.format(len(val_loader.dataset)+len(train_loader.dataset),
-                                                                           len(train_loader.dataset),
+    #print('{} samples found, {} train samples and {} test samples '.format(len(val_loader.dataset)+len(train_loader.dataset),
+    #                                                                       len(train_loader.dataset),
+    #                                                                       len(val_loader.dataset)))
+    print('{} samples found, {} train samples and {} test samples '.format(len(val_loader.dataset)+train_loader_len,
+                                                                           train_loader_len,
                                                                            len(val_loader.dataset)))
     # create model
     model = models.__dict__[args.arch](network_data,
-                                       device         = args.device,
-                                       use_checkpoint = args.use_checkpoint,
-                                       use_flow1      = args.use_flow1,
-                                       lr_finder      = args.lr_finder,
-                                       div_flow       = args.div_flow,
-                                       batchnorm      = args.batchnorm).to(args.device)
+                                       device           = args.device,
+                                       use_checkpoint   = args.use_checkpoint,
+                                       useFlow1         = args.useFlow1,
+                                       useContext       = args.useContext,
+                                       useResidual      = args.useResidual,
+                                       useDenseNet      = args.useDenseNet,
+                                       max_displacement = args.max_displacement,
+                                       lr_finder        = args.lr_finder,
+                                       div_flow         = args.div_flow,
+                                       batchnorm        = args.batchnorm,
+                                       large_motion     = args.large_motion,
+                                       mixed_precision  = args.mixed_precision).to(args.device)
 
     if args.device.type == "cuda" and args.n_GPUs > 1:
         model = torch.nn.DataParallel(model).cuda()
@@ -504,7 +644,7 @@ def main():
         if args.lr_finder:
             #Need to crop video so that it doesn't need to be resized
             custom_train_iter = CustomTrainIter(train_loader)
-            num_iter = len(train_loader) if args.epoch_size == 0 else min(len(train_loader), args.epoch_size)
+            num_iter = train_loader_len if args.epoch_size == 0 else min(train_loader_len, args.epoch_size)
             if args.lr_finder_Leslie_Smith:
                 custom_val_iter = CustomValIter(loader_test)
                 lr_finder = LRFinder(model, optimizer, args.loss_Flow_net, device="cuda")
@@ -534,24 +674,24 @@ def main():
         kwargs = {'max_lr':          args.max_lr,
                   'epochs':          args.epochs,
                   'div_factor':      div_factor,
-                  'steps_per_epoch': len(train_loader)}
+                  'steps_per_epoch': train_loader_len}
         scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, **kwargs)
     elif args.scheduler == 'OneCycle':
         OC_total_steps = int(args.num_steps / args.step_size) + 100
-        kwargs = {'max_lr':          args.lr,
+        kwargs = {'max_lr':          args.max_lr,
                   'total_steps':     OC_total_steps,
                   'pct_start':       args.pct_start,
                   'cycle_momentum':  False,
-                  'anneal_strategy': 'linear',
-                  'steps_per_epoch': len(train_loader)}
+                  'anneal_strategy': args.anneal_strategy,
+                  'steps_per_epoch': train_loader_len}
         scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, **kwargs)
     elif args.scheduler == 'cycliclr':
-        args.epoch_size = int(len(train_loader)/2.) * 2 if args.epoch_size == 0 else min(len(train_loader), args.epoch_size)
+        args.epoch_size = int(train_loader_len/2.) * 2 if args.epoch_size == 0 else min(train_loader_len, args.epoch_size)
         args.step_size_up = int(args.epoch_size/2) if args.step_size_up == 0 else args.step_size_up
         kwargs = {'base_lr':        args.lr,
                   'max_lr':         args.max_lr,
                   'cycle_momentum': False if args.solver != 'sgd' else True, #needs to be False for Adam/AdamW
-                  'step_size_up':   args.step_size_up,
+                  'step_size_up':   int(args.step_size_up/args.step_size),
                   'mode':           args.CyclicLR_mode,
                   'gamma':          args.CyclicLR_gamma}
         scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, **kwargs)
@@ -561,7 +701,7 @@ def main():
 
         #Need to crop video so that it doesn't need to be resized
         #custom_train_iter = CustomTrainIter(train_loader)
-        num_iter = len(train_loader) if args.epoch_size == 0 else min(len(train_loader), args.epoch_size)
+        num_iter = train_loader_len if args.epoch_size == 0 else min(train_loader_len, args.epoch_size)
         fig_kw = {'figsize': [19.2,10.8]}
         #plt.rcParams.update({'font.size': 20})
         plt.ticklabel_format(axis="x",style="sci",scilimits=(0,0))
@@ -569,21 +709,21 @@ def main():
         if args.lr_finder_Leslie_Smith:
             custom_val_iter = CustomValIter(loader_test)
             lr_finder = LRFinder(model, optimizer, args.loss_Flow_net, device="cuda")
-            lr_finder.range_test(train_loader,#custom_train_iter,
+            lr_finder.range_test(train_loader, #custom_train_iter,
                                  #val_loader = custom_val_iter,
                                  end_lr     = args.max_lr,
                                  num_iter   = num_iter,
                                  step_mode  = "linear")
         else:
             lr_finder = LRFinder(model, optimizer, args.loss_Flow_net, device="cuda")
-            lr_finder.range_test(train_loader,#custom_train_iter,
+            lr_finder.range_test(train_loader, #custom_train_iter,
                                  end_lr   = args.max_lr,
                                  num_iter = num_iter)
         lr_finder.plot(ax=ax)
         plt.grid(True)
         fig.tight_layout()
         eval_writer = SummaryWriter(log_dir=args.save_path / args.run_path / 'eval')
-        eval_writer.add_figure('lr_finder Length: {}/Loss: {}/div_flow: {}'.format(len(train_loader),args.loss, args.div_flow),
+        eval_writer.add_figure('lr_finder Length: {}/Loss: {}/div_flow: {}'.format(train_loader_len,args.loss, args.div_flow),
                                fig,
                                global_step=0)
         plt.close()
@@ -616,7 +756,6 @@ def main():
     args.test_EPE = 0
     args.test_Fl = 0
     args.test_WAUC = 0
-    args.epoch_size = len(train_loader) if args.epoch_size == 0 else args.epoch_size
     args.test_epoch_size = len(val_loader) if args.test_epoch_size == 0 else args.test_epoch_size
 
     try:
@@ -630,19 +769,68 @@ def main():
 
         # This is just for testing. Disable when not needed
         #torch.autograd.set_detect_anomaly(True)
-        while args.total_steps <= args.num_steps:
-            # train for one epoch
-            train(train_loader, val_loader, model, optimizer, scheduler, train_writer, inverse_transform)
-            args.train_loader_start = 0
+        while args.total_steps <= args.max_num_steps:
+            #for i in range(len(args.datasets)):
+            if True:
+                args.mini_batch_size = mini_batch_sizes[args.datasets[0]]
+                args.accumulation_steps = int(args.batch_size / args.mini_batch_size)
+                args.epoch_size = len(train_loaders[args.datasets[0]]) if epoch_sizes[args.datasets[0]] == 0 else epoch_sizes[args.datasets[0]]
+                tqdm_train0.reset(total=args.epoch_size)
+                tqdm_train1.reset(total=args.epoch_size)
+                tqdm_train2.reset(total=args.epoch_size)
+                # train for one epoch
+                #train(train_loader, val_loader, model, optimizer, scheduler, train_writer, inverse_transform)
+                train(train_loaders[args.datasets[0]], val_loader, model, optimizer, scheduler, train_writer, inverse_transform, args.datasets[0])
+                args.train_loader_start = 0
 
-            if args.scheduler in ['steplr','multisteplr']:
-                scheduler.step()
+                if args.scheduler in ['steplr','multisteplr']:
+                    scheduler.step()
+
+            #Rotate list left
+            args.datasets.append(args.datasets.pop(0))
+            
+            args.flow_EPE_Avg = flow_EPEs.avg
+            args.flow_EPE_Count = flow_EPEs.count
+            args.flow_F1_Avg = flow_Fls.avg
+            args.flow_F1_Count = flow_Fls.count
+            args.flow_WAUC_Avg = flow_WAUCs.avg
+            args.flow_WAUC_Count = flow_WAUCs.count
+            args.flow1_WAUC_Avg = flow1_WAUC.avg
+            args.flow2_WAUC_Avg = flow2_WAUC.avg
+            args.flow3_WAUC_Avg = flow3_WAUC.avg
+            args.flow4_WAUC_Avg = flow4_WAUC.avg
+            args.flow5_WAUC_Avg = flow5_WAUC.avg
+            args.flow6_WAUC_Avg = flow6_WAUC.avg
+            args.flow1_WAUC_Count = flow1_WAUC.count
+            args.flow2_WAUC_Count = flow2_WAUC.count
+            args.flow3_WAUC_Count = flow3_WAUC.count
+            args.flow4_WAUC_Count = flow4_WAUC.count
+            args.flow5_WAUC_Count = flow5_WAUC.count
+            args.flow6_WAUC_Count = flow6_WAUC.count
+            args.flow1_EPE_Avg = flow1_EPE.avg
+            args.flow2_EPE_Avg = flow2_EPE.avg
+            args.flow3_EPE_Avg = flow3_EPE.avg
+            args.flow4_EPE_Avg = flow4_EPE.avg
+            args.flow5_EPE_Avg = flow5_EPE.avg
+            args.flow6_EPE_Avg = flow6_EPE.avg
+            args.flow1_EPE_Count = flow1_EPE.count
+            args.flow2_EPE_Count = flow2_EPE.count
+            args.flow3_EPE_Count = flow3_EPE.count
+            args.flow4_EPE_Count = flow4_EPE.count
+            args.flow5_EPE_Count = flow5_EPE.count
+            args.flow6_EPE_Count = flow6_EPE.count
+            
+            
+            
 
             model_state_dict = {}
             model_state_dict['args'] = args
             model_state_dict['state_dict'] = model.state_dict()
             model_state_dict['optimizer_state_dict'] = optimizer.state_dict()
-            model_state_dict['scheduler_state_dict'] = scheduler.state_dict()
+            scheduler_dict = scheduler.state_dict()
+            if '_scale_fn_ref' in scheduler_dict.keys():
+                scheduler_dict.pop('_scale_fn_ref')
+            model_state_dict['scheduler_state_dict'] = scheduler_dict
             model_state_dict['rng_state'] = torch.get_rng_state()
             model_state_dict['random_state'] = random.getstate()
             model_state_dict['numpy_random_state'] = np.random.get_state()
@@ -654,7 +842,7 @@ def main():
             #                    'random_state': random_state,
             #                    'numpy_random_state': numpy_random_state}
             torch.save(model_state_dict, args.save_path / args.run_path / 'checkpoint.pt')
-            if args.total_steps >= args.num_steps:
+            if args.total_steps >= args.max_num_steps:
                 break
             if terminate:
                 break
@@ -668,36 +856,37 @@ def main():
         tqdm_test2.close()
 
         # Save the final stats as a hparams even if there is a crash
-        train_writer.add_hparams({'Batch Size':      '{:1d}'.format(args.batch_size),
-                                  'Test Batch Size': '{:1d}'.format(args.test_batch_size),
-                                  'Parameters':      count_parameters(model),
-                                  'Optimizer':       args.solver,
-                                  'Scheduler':       args.scheduler,
-                                  'Loss Function':   args.loss,
-                                  'Dataset':         args.dataset,
-                                  'Test Dataset':    args.testdataset,
-                                  'div flow':        '{:1d}'.format(args.div_flow),
-                                  'Epoch':           args.start_epoch,
-                                  'Iterations':      args.num_steps},
-                                 metric_dict = {'Test/EPE':    args.best_EPE,
-                                                'Test/Fl':     args.best_Fl,
-                                                'Test/WAUC':   args.best_WAUC},
-                                 #hparam_domain_discrete={'Batch Size':       ['1','16','22'],
-                                 #                        'Test Batch Size':  ['1','6'],
-                                 #                        'div flow':     ['1','20','256','512','1024'],
-                                 #                        'Dataset':      ['N/A',
-                                 #                                         'flying_chairs2',
-                                 #                                         'flying_things_final',
-                                 #                                         'flying_things_clean',
-                                 #                                         'flying_things_both',
-                                 #                                         'AutoFlow'],
-                                 #                        'Test Dataset': ['KITTI_2012_noc',
-                                 #                                         'KITTI_2012_occ',
-                                 #                                         'KITTI_2015_noc',
-                                 #                                         'KITTI_2015_occ',
-                                 #                                         'mpi_sintel_final',
-                                 #                                         'mpi_sintel_clean']},
-                                 run_name='hparams')
+        if args.total_steps >= args.num_steps:
+            train_writer.add_hparams({'Batch Size':      '{:1d}'.format(args.batch_size),
+                                      'Test Batch Size': '{:1d}'.format(args.test_batch_size),
+                                      'Parameters':      count_parameters(model),
+                                      'Optimizer':       args.solver,
+                                      'Scheduler':       args.scheduler,
+                                      'Loss Function':   args.loss,
+                                      'Dataset':         ','.join(args.datasets),
+                                      'Test Dataset':    args.testdataset,
+                                      'div flow':        '{:1d}'.format(args.div_flow),
+                                      'Epoch':           args.start_epoch,
+                                      'Iterations':      args.num_steps},
+                                     metric_dict = {'Test/EPE':    args.best_EPE,
+                                                    'Test/Fl':     args.best_Fl,
+                                                    'Test/WAUC':   args.best_WAUC},
+                                     #hparam_domain_discrete={'Batch Size':       ['1','16','22'],
+                                     #                        'Test Batch Size':  ['1','6'],
+                                     #                        'div flow':     ['1','20','256','512','1024'],
+                                     #                        'Dataset':      ['N/A',
+                                     #                                         'flying_chairs2',
+                                     #                                         'flying_things_final',
+                                     #                                         'flying_things_clean',
+                                     #                                         'flying_things_both',
+                                     #                                         'AutoFlow'],
+                                     #                        'Test Dataset': ['KITTI_2012_noc',
+                                     #                                         'KITTI_2012_occ',
+                                     #                                         'KITTI_2015_noc',
+                                     #                                         'KITTI_2015_occ',
+                                     #                                         'mpi_sintel_final',
+                                     #                                         'mpi_sintel_clean']},
+                                     run_name='hparams')
 
     except:
         tqdm_main.close()
@@ -711,7 +900,7 @@ def main():
 
 
 
-def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, inverse_transform):
+def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, inverse_transform, dataset_name):
     global args, tqdm_main, tqdm_train0, tqdm_train1, tqdm_train2
     realEPE = utils.EPE()
     realWAUC = utils.WAUC()
@@ -719,6 +908,7 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
 
     # Recreate scaler every epoch.
     scaler = GradScaler(enabled=args.mixed_precision)
+    lr = scheduler.get_last_lr()[0]
 
     # switch to train mode
     model.train()
@@ -728,9 +918,6 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
     frames_total = len(train_loader.dataset)
     frames_completed = 0
     end = time.time()
-    tqdm_train0.reset()
-    tqdm_train1.reset()
-    tqdm_train2.reset()
     flowGT_mean = AverageMeter()
     flow1_mean = AverageMeter()
     flow2_mean = AverageMeter()
@@ -748,10 +935,12 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
 
     for i, (inputs, target) in enumerate(train_loader):
         if i >= args.epoch_size:
-            tqdm_train1.set_description('Train: EPE {0}\t Fl {1}\t WAUC {2}\t - Train iterations exceeded {3}'.format(
-                                        flow1_EPEs,
-                                        flow1_Fls,
-                                        flow1_WAUCs,
+            tqdm_train1.set_description('Dataset {0}  Train: EPE {1}  Fl {2}  WAUC {3}  LR {4:.3e} - exceeded {5}'.format(
+                                        dataset_name,
+                                        flow_EPEs,
+                                        flow_Fls,
+                                        flow_WAUCs,
+                                        lr,
                                         args.epoch_size))
             break
         args.total_steps += args.step_size / args.accumulation_steps
@@ -762,6 +951,9 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
         target = target.to(args.device)
         target[:,:2,:,:] *= mask[:,None,:,:]
         inputs = inputs.to(args.device)
+        #b, N, c, intHeight, intWidth = inputs.size()
+        #args.div_flow = max(intWidth, intHeight)
+
         
         with torch.cuda.amp.autocast():
             outputs = model(inputs)
@@ -770,21 +962,21 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
         if args.split_losses:
             loss_total, loss_EPE, loss_WAUCl = args.loss_Flow_net(outputs, target)
           # Without .detach() there is a memory leak. Don't need grad on these
-            if args.use_flow1:
+            if args.useFlow1:
                 flow1_WAUC.update(100 - loss_WAUCl[0].detach(), target.size(0))
             flow2_WAUC.update(100 - loss_WAUCl[1].detach(), target.size(0))
             flow3_WAUC.update(100 - loss_WAUCl[2].detach(), target.size(0))
             flow4_WAUC.update(100 - loss_WAUCl[3].detach(), target.size(0))
             flow5_WAUC.update(100 - loss_WAUCl[4].detach(), target.size(0))
             flow6_WAUC.update(100 - loss_WAUCl[5].detach(), target.size(0))
-            if args.use_flow1:
+            if args.useFlow1:
                 flow1_EPE.update(loss_EPE[0].detach(), target.size(0))
             flow2_EPE.update(loss_EPE[1].detach(), target.size(0))
             flow3_EPE.update(loss_EPE[2].detach(), target.size(0))
             flow4_EPE.update(loss_EPE[3].detach(), target.size(0))
             flow5_EPE.update(loss_EPE[4].detach(), target.size(0))
             flow6_EPE.update(loss_EPE[5].detach(), target.size(0))
-            if args.use_flow1:
+            if args.useFlow1:
                 loss_EPE = loss_EPE[0].detach().cpu().numpy()
                 accuracy_WAUC = 100 - loss_WAUCl[0].detach()
             else:
@@ -797,7 +989,7 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
         # record loss and EPE
         flowGT_max = max(flowGT_max, target.detach().abs().max())
         
-        if args.use_flow1:
+        if args.useFlow1:
             flow1_max = max(flow1_max, outputs[0].detach().abs().max())
         flow2_max = max(flow2_max, outputs[1].detach().abs().max())
         flow3_max = max(flow3_max, outputs[2].detach().abs().max())
@@ -805,14 +997,14 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
         flow5_max = max(flow5_max, outputs[4].detach().abs().max())
         flow6_max = max(flow6_max, outputs[5].detach().abs().max())
         flowGT_mean.update(target.detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean(), target.size(0))
-        if args.use_flow1:
+        if args.useFlow1:
             flow1_test = outputs[0].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
         flow2_test = outputs[1].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
         flow3_test = outputs[2].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
         flow4_test = outputs[3].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
         flow5_test = outputs[4].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
         flow6_test = outputs[5].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        if args.use_flow1:
+        if args.useFlow1:
             if not np.isinf(flow1_test):
                 flow1_mean.update(flow1_test, target.size(0))
         if not np.isinf(flow2_test):
@@ -838,30 +1030,32 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
         #accuracy_WAUC = realWAUC(outputs[0], target)
 
         if not args.split_losses:
-            if args.use_flow1:
+            if args.useFlow1:
                 loss_EPE = realEPE(outputs[0].detach(), target).cpu().numpy()
                 accuracy_WAUC = realWAUC(outputs[0].detach(), target)
             else:
                 loss_EPE = realEPE(outputs[1].detach(), target).cpu().numpy()
                 accuracy_WAUC = realWAUC(outputs[1].detach(), target)
         elif args.loss ==  '1*mWAUCl+2*mEPE1':
-            if args.use_flow1:
+            if args.useFlow1:
                 loss_EPE = realEPE(outputs[0].detach(), target).cpu().numpy()
             else:
                 loss_EPE = realEPE(outputs[1].detach(), target).cpu().numpy()
-        if args.use_flow1:
+        if args.useFlow1:
             loss_Fl = realFl(outputs[0].detach(), target)
         else:
             loss_Fl = realFl(outputs[1].detach(), target)
         if not np.isinf(loss_EPE):
-            flow1_EPEs.update(loss_EPE, target.size(0))
-        flow1_Fls.update(loss_Fl, torch.sum(mask).item())
-        flow1_WAUCs.update(accuracy_WAUC, torch.sum(mask).item())
+            flow_EPEs.update(loss_EPE, target.size(0))
+        flow_Fls.update(loss_Fl, torch.sum(mask).item())
+        flow_WAUCs.update(accuracy_WAUC, torch.sum(mask).item())
         learningRates.update(lr, target.size(0))
-        tqdm_train1.set_description('Train: EPE {0}\t Fl {1}\t WAUC {2}'.format(
-                                    flow1_EPEs,
-                                    flow1_Fls,
-                                    flow1_WAUCs))
+        tqdm_train1.set_description('Dataset {0}  Train: EPE {1}  Fl {2}  WAUC {3}  LR {4:.3e}'.format(
+                                    dataset_name,
+                                    flow_EPEs,
+                                    flow_Fls,
+                                    flow_WAUCs,
+                                    lr))
         if args.total_steps % args.step_size == 0:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -873,17 +1067,17 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
             if not skip_lr_sched:
                 scheduler.step()
             if args.total_steps % args.print_freq  == 0:
-                train_writer.add_scalar('Train/EPE',  flow1_EPEs.avg,    args.total_steps)
-                train_writer.add_scalar('Train/Fl',   flow1_Fls.avg,     args.total_steps)
-                train_writer.add_scalar('Train/WAUC', flow1_WAUCs.avg,   args.total_steps)
-                train_writer.add_scalar('Train/lr',   learningRates.avg, args.total_steps)
-                flow1_EPEs.reset()
-                flow1_Fls.reset()
-                flow1_WAUCs.reset()
+                train_writer.add_scalar('Train/EPE',  flow_EPEs.avg,    global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/Fl',   flow_Fls.avg,     global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/WAUC', flow_WAUCs.avg,   global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/lr',   learningRates.avg, global_step = args.total_steps, new_style = True)
+                flow_EPEs.reset()
+                flow_Fls.reset()
+                flow_WAUCs.reset()
                 learningRates.reset()
             if (args.total_steps) % args.val_freq  == 0:
                 if args.split_losses:
-                    if args.use_flow1:
+                    if args.useFlow1:
                         train_writer.add_scalars('split_WAUC',
                                                  {'flow1': flow1_WAUC.avg,
                                                   'flow2': flow2_WAUC.avg,
@@ -954,12 +1148,14 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
                 flow6_mean.avg, flow6_max))
         
         
-        if args.total_steps >= args.num_steps:
-            tqdm_train1.set_description('Train: EPE {0}\t Fl {1}\t WAUC {2}\t - Train Exceeded total steps {3}'.format(
-                                        flow1_EPEs,
-                                        flow1_Fls,
-                                        flow1_WAUCs,
-                                        args.num_steps))
+        if args.total_steps >= args.max_num_steps:
+            tqdm_train1.set_description('Dataset {0}  Train: EPE {1}  Fl {2}  WAUC {3}  LR {4:.3e} - Exceeded total {5}'.format(
+                                        dataset_name,
+                                        flow_EPEs,
+                                        flow_Fls,
+                                        flow_WAUCs,
+                                        lr,
+                                        args.max_num_steps))
             break
 
 
@@ -999,7 +1195,7 @@ def validate(val_loader, model, run_writer, inverse_transform):
 
     for i, (inputs, target) in enumerate(val_loader):
         if i >= args.test_epoch_size:
-            tqdm_test1.set_description('Train: EPE {0}\t Fl {1}\t WAUC {2}\t - Test iterations exceeded {3}'.format(
+            tqdm_test1.set_description('Train: EPE {0}   Fl {1}   WAUC {2}   - Test iterations exceeded {3}'.format(
                                        test_flow2_EPEs,
                                        test_flow2_Fls,
                                        test_flow2_WAUCs,
@@ -1018,39 +1214,81 @@ def validate(val_loader, model, run_writer, inverse_transform):
 
         
         # Need input image resolution to always be a multiple of 64
-        #b, N, c, intHeight, intWidth = inputs.size()
-        #intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
-        #intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
-        #if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
-        #    # Faster but same memory utilization. Without detach it is slower but takes less memory.
-        #    pass
-        #    #tensorFirst = inputs[:, 0, :, :, :]
-        #    #tensorSecond = inputs[:, 1, :, :, :]
-        #else:
-        #    tensorFirst = F.interpolate(
-        #                        input         = inputs[:,0,:,:,:],
-        #                        size          = (intPreprocessedHeight, intPreprocessedWidth),
-        #                        mode          = 'bicubic',
-        #                        align_corners = False,
-        #                        antialias     = True)
-        #    tensorSecond = F.interpolate(
-        #                        input         = inputs[:,1,:,:,:],
-        #                        size          = (intPreprocessedHeight, intPreprocessedWidth),
-        #                        mode          = 'bicubic',
-        #                        align_corners = False,
-        #                        antialias     = True)
-        #    inputs = torch.stack((tensorFirst, tensorSecond), dim=1)
+        b, N, c, intHeight, intWidth = inputs.size()
+        intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
+        intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
+        #args.div_flow = max(intPreprocessedWidth, intPreprocessedHeight)
+        
+        if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
+            # Faster but same memory utilization. Without detach it is slower but takes less memory.
+            #pass
+            tensorFirst = inputs[:, 0, :, :, :]
+            tensorSecond = inputs[:, 1, :, :, :]
+            #padding_left = None
+            #padding_right = None
+            #padding_top = None
+            #padding_bottom = None
+        else:
+        # Pad image instead of resizing it. Resizing with interpolation causes distortions
+            #padding_left = int(math.floor((intPreprocessedWidth-intWidth)/2))
+            #padding_right = intPreprocessedWidth - intWidth - padding_left
+            #padding_top = int(math.floor((intPreprocessedHeight-intHeight)/2))
+            #padding_bottom = intPreprocessedHeight - intHeight - padding_top
+            #tensorFirst = F.pad(input = inputs[:,0,:,:,:],
+            #                    pad   = (padding_left,padding_right,padding_top,padding_bottom),
+            #                    mode  = 'reflect')
+            #tensorSecond = F.pad(input = inputs[:,1,:,:,:],
+            #                     pad   = (padding_left,padding_right,padding_top,padding_bottom),
+            #                     mode  = 'reflect')
+            #inputs = torch.stack((tensorFirst, tensorSecond), dim=1)
+            #print('inputs[:,0,:,:,:]',inputs[:,0,:,:,:].shape)
+            #print('tensorFirst',tensorFirst.shape)
+        # 
+            tensorFirst = F.interpolate(
+                                input         = inputs[:,0,:,:,:],
+                                size          = (intPreprocessedHeight, intPreprocessedWidth),
+                                mode          = 'bilinear',
+                                align_corners = False,
+                                antialias     = True)
+            tensorSecond = F.interpolate(
+                                input         = inputs[:,1,:,:,:],
+                                size          = (intPreprocessedHeight, intPreprocessedWidth),
+                                mode          = 'bilinear',
+                                align_corners = False,
+                                antialias     = True)
+            inputs = torch.stack((tensorFirst, tensorSecond), dim=1)
 
         with torch.cuda.amp.autocast():
             output = model(inputs)
         
-        #output = F.interpolate(
-        #                    input         = output,
-        #                    size          = (intHeight, intWidth),
-        #                    mode          = 'bicubic',
-        #                    align_corners = False)
-        #output[:, 0, :, :] *= intWidth / intPreprocessedWidth
-        #output[:, 1, :, :] *= intHeight / intPreprocessedHeight
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print()
+        #print('output',output.shape)
+        #if padding_left is not None:
+        #    output = transforms.functional.crop(img    = output,
+        #                                        top    = padding_top,
+        #                                        left   = padding_left,
+        #                                        height = intHeight,
+        #                                        width  = intWidth)
+        #print('output.resized',output.shape)
+        #print('mask',mask.shape)
+        output = F.interpolate(
+                            input         = output,
+                            size          = (intHeight, intWidth),
+                            mode          = 'bilinear',
+                            align_corners = False)
+        output[:, 0, :, :] *= intWidth / intPreprocessedWidth
+        output[:, 1, :, :] *= intHeight / intPreprocessedHeight
 
 
         flowGT_max = max(flowGT_max, target.detach().abs().max())
@@ -1065,6 +1303,7 @@ def validate(val_loader, model, run_writer, inverse_transform):
         flow2_EPE = realEPE(output*mask[:,None,:,:], target)
         flow2_Fl = realFl(output, target, mask)
         flow2_WAUC = realWAUC(output, target, mask)
+        output *= mask[:,None,:,:]
 
         # record EPE
         test_flow2_EPEs.update(flow2_EPE.item(), target.size(0))
@@ -1078,6 +1317,18 @@ def validate(val_loader, model, run_writer, inverse_transform):
         # log first output of first batches
         if (i * args.test_batch_size) % args.image_freq == 0 and run_writer is not None and j < 3:
             frame = args.test_batch_size * i
+            # sometimes output flows can have data that is too big to convert to an image. Clipping it to stop errors
+            # target has already been masked
+            c, h, w = output[0,:,:,:].shape
+            invalid = torch.logical_or(torch.logical_or(torch.isnan(output[0,0,:,:]), torch.isnan(output[0,1,:,:])),
+                                       torch.logical_or(torch.isinf(output[0,0,:,:]), torch.isinf(output[0,1,:,:])))
+            output[0,0,:,:][invalid] = 0.0
+            output[0,1,:,:][invalid] = 0.0
+            invalid = torch.logical_or(invalid, torch.logical_or(torch.abs(output[0,0,:,:]) >= w,
+                                                                 torch.abs(output[0,1,:,:]) >= h))
+            output[0,0,:,:][invalid] = 0.0
+            output[0,1,:,:][invalid] = 0.0
+
 
             if args.best_WAUC == -1:
                 target_flow_image = flow_vis.flow_to_color(target[0,:2,:,:].permute((1,2,0)).detach().cpu().numpy(),
@@ -1098,19 +1349,9 @@ def validate(val_loader, model, run_writer, inverse_transform):
                                          inputs[:, 1, :, :, :][0,:3].clamp(0,1).cpu(),
                                          1)
                 if j == 0:
-                    print()
-                    print()
-                    print()
-                    print()
-                    print()
-                    print()
-                    print()
-                    print()
                     run_writer.add_graph(model, inputs)
-                    print()
-                    print()
 
-            output_flow_image = flow_vis.flow_to_color(output[0,:2,:,:].permute((1,2,0)).detach().cpu().numpy(),
+            output_flow_image = flow_vis.flow_to_color(output[0,:2,:,:].permute((1,2,0)).detach().cpu().numpy().astype(np.float32),
                                                        clip_flow=None).transpose((2, 0, 1))
             run_writer.add_image('Output{}'.format(frame),
                                  output_flow_image,
@@ -1120,7 +1361,7 @@ def validate(val_loader, model, run_writer, inverse_transform):
         tqdm_test0.set_postfix_str(s='[{}/{}]'.format(frames_completed,
                                                       frames_total))
         tqdm_test0.update(1)
-        tqdm_test1.set_description('Test: EPE {0}\t Fl {1}\t WAUC {2}'.format(
+        tqdm_test1.set_description('Test: EPE {0}   Fl {1}   WAUC {2}'.format(
                                    test_flow2_EPEs,
                                    test_flow2_Fls,
                                    test_flow2_WAUCs))
@@ -1129,9 +1370,9 @@ def validate(val_loader, model, run_writer, inverse_transform):
                 flowGT_mean.avg, flowGT_max,
                 flow2_mean.avg, flow2_max))
 
-    run_writer.add_scalar('Test/EPE',  test_flow2_EPEs.avg,  args.total_steps)
-    run_writer.add_scalar('Test/Fl',   test_flow2_Fls.avg,   args.total_steps)
-    run_writer.add_scalar('Test/WAUC', test_flow2_WAUCs.avg, args.total_steps)
+    run_writer.add_scalar('Test/EPE',  test_flow2_EPEs.avg,  global_step = args.total_steps, new_style = True)
+    run_writer.add_scalar('Test/Fl',   test_flow2_Fls.avg,   global_step = args.total_steps, new_style = True)
+    run_writer.add_scalar('Test/WAUC', test_flow2_WAUCs.avg, global_step = args.total_steps, new_style = True)
     is_best = test_flow2_EPEs.avg < args.best_EPE
     is_best_WAUC = test_flow2_WAUCs.avg > args.best_WAUC
     args.best_EPE  = min(test_flow2_EPEs.avg,  args.best_EPE)

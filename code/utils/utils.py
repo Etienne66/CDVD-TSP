@@ -394,7 +394,15 @@ class multiscaleLoss(nn.Module):
         if self.split_losses and self.loss in ('WAUCl','EPE','EPE1'):
             if self.weights is None:
                 if len(network_output) == 6:
-                    self.weights = [1, 0.5, 0.25, 0.25, 0.25, 0.25]  # as in original article but converted for mean loss
+                    if network_output[0] is None:
+                        #self.weights = [0, 1, 0.5, 0.25, 0.25, 0.25]  # as in original article but converted for mean loss
+                        #self.weights = [0, 1, 0.5, 0.25, 0.125, 0.0625]  # as in original article but converted for mean loss
+                        #self.weights = [0, 1, 0.5, 0.4, 0.3, 0.2]  # as in original article but converted for mean loss
+                        self.weights = [0, 1, 0.75, 0.5, 0.375, 0.25]  # as in original article but converted for mean loss
+                    else:
+                        #self.weights = [1, 0.5, 0.25, 0.25, 0.25, 0.25]  # as in original article but converted for mean loss
+                        #self.weights = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125]  # as in original article but converted for mean loss
+                        self.weights = [1, 0.75, 0.625, 0.5, 0.375, 0.25]  # as in original article but converted for mean loss
                 else:
                     self.weights = [1, 0.5, 0.25, 0.25, 0.25]  # as in original article but converted for mean loss
                 #weights = [1, 1, 1, 1, 1]  # as in original article but converted for mean loss

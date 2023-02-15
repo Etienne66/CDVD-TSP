@@ -29,6 +29,13 @@ class AverageMeter(object):
 
     def update(self, val, n=1):
         self.val = val
+        if torch.is_tensor(val):
+            if torch.isnan(val):
+                return
+        else:
+            if np.isnan(val):
+                return
+
         self.min = min(self.min, val)
         self.max = max(self.max, val)
         self.sum += val * n

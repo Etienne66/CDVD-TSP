@@ -28,9 +28,9 @@ def get_gt_correspondence_mask(flow):
     flow_u[invalid] = 0
     flow_v[invalid] = 0
 
-    #invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u) >= w, np.abs(flow_v) >= h))
-    #flow_u[invalid] = 0
-    #flow_v[invalid] = 0
+    invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u) >= w, np.abs(flow_v) >= h))
+    flow_u[invalid] = 0
+    flow_v[invalid] = 0
     
     mask = np.logical_not(invalid)
     return mask

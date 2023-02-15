@@ -107,6 +107,29 @@ def readFlowKITTI(filename):
     flow = (flow - 2**15) / 64.0      # flow / 64 - 512
     return flow, valid
 
+def readFlowNPZ(filename):
+    with np.load(filename) as data: #, allow_pickle=True, encoding='bytes', fix_imports=True
+        flow_u = data['u']#.astype(np.float32)
+        flow_v = data['v']#.astype(np.float32)
+        if 'mask' in data.keys():
+            valid = data['mask'].astype(np.bool)
+        else:
+            h,w = flow_u.shape
+            #print('h: ',h,', w: ',w)
+            invalid = np.logical_or(np.logical_or(np.isnan(flow_u), np.isnan(flow_v)),
+                                    np.logical_or(np.isinf(flow_u), np.isinf(flow_v)))
+            flow_u[invalid] = 0
+            flow_v[invalid] = 0
+            invalid = np.logical_or(invalid,
+                                    np.logical_or(np.abs(flow_u) >= w,
+                                                  np.abs(flow_v) >= h))
+            flow_u[invalid] = 0
+            flow_v[invalid] = 0
+            valid = np.logical_not(invalid)
+    flow = np.stack((flow_u, flow_v), axis=-1)
+    return flow, valid
+
+
 def readDispKITTI(filename):
     disp = cv2.imread(filename, cv2.IMREAD_ANYDEPTH) / 256.0
     valid = disp > 0.0

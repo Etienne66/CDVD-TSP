@@ -9,8 +9,8 @@ __global__ void kernel_Correlation_rearrange(
     const int height,
     const int channels,
     const int padding,
-    const float* input,
-    float* output)
+    const half* input,
+    half* output)
   { //blob_rearrange_kernel2
     const int pbottomwidth = width + 2*padding;
     const int pbottomheight = height + 2*padding;
@@ -25,7 +25,7 @@ __global__ void kernel_Correlation_rearrange(
     int ch = blockIdx.y;
     int n = blockIdx.z;
 
-    float value = input[(n * channels + ch) * widthheight + xy];
+    half value = input[(n * channels + ch) * widthheight + xy];
 
     __syncthreads();
 
@@ -47,9 +47,9 @@ __global__ void kernel_Correlation_updateOutput(
     const int max_displacement,
     const int stride1,
     const int stride2,
-    const float* rbot0,
-    const float* rbot1,
-    float* top)
+    const half* rbot0,
+    const half* rbot1,
+    half* top)
   { //CorrelateData
     extern __shared__ char patch_data_char[];
     const int round_off = ROUND_OFF;
@@ -68,7 +68,7 @@ __global__ void kernel_Correlation_updateOutput(
     const int bottomheight = pbottomheight;
     const int topcount = topChannels*topwidth*topheight;
 
-    float *patch_data = (float *)patch_data_char;
+    half *patch_data = (half *)patch_data_char;
     
     // First (upper left) position of kernel upper-left corner in current center position of neighborhood in image 1
     int x1 = blockIdx.x*stride1 + max_displacement;
@@ -90,7 +90,7 @@ __global__ void kernel_Correlation_updateOutput(
     
     __syncthreads();
     
-    __shared__ float sum[WARPS_PER_BLOCK*THREADS_PER_WARP];
+    __shared__ half sum[WARPS_PER_BLOCK*THREADS_PER_WARP];
     
     // Compute correlation
     for (int top_channel = 0; top_channel < topChannels; top_channel++) {
@@ -117,13 +117,13 @@ __global__ void kernel_Correlation_updateOutput(
       __syncthreads();
       
       if (ch_off == 0) {
-        float total_sum = 0;
+        half total_sum = 0;
         for (int idx = 0; idx < WARPS_PER_BLOCK*THREADS_PER_WARP; idx++) {
           total_sum += sum[idx];
         }
         const int sumelems = kernel_size*kernel_size*bottomchannels;
         const int index = ((top_channel*topheight + blockIdx.y)*topwidth)+blockIdx.x;
-        top[index + item*topcount] = total_sum / (float)sumelems;
+        top[index + item*topcount] = total_sum / (half)sumelems;
       }
     }
   }
@@ -141,9 +141,9 @@ __global__ void kernel_Correlation_updateGradFirst(
     const int stride2,
     const int pixels, 
     const int intSample,
-    const float* rbot1,
-    const float* gradOutput,
-    float* gradFirst)
+    const half* rbot1,
+    const half* gradOutput,
+    half* gradFirst)
   { //CorrelateDataBackward0
     //Get X,Y ranges and clamp
     // round_off is a trick to enable integer division with ceil, even for negative numbers
@@ -177,7 +177,7 @@ __global__ void kernel_Correlation_updateGradFirst(
       int xmax = (l - max_displacement + round_off_s1) / stride1 - round_off; // floor (l - max_displacement) / stride1
       int ymax = (m - max_displacement + round_off_s1) / stride1 - round_off; // floor (m - max_displacement) / stride1
       
-      float sum = 0;
+      half sum = 0;
       if (xmax>=0 && ymax>=0 && (xmin<=topwidth-1) && (ymin<=topheight-1)) {
         xmin = max(0,xmin);
         xmax = min(topwidth-1,xmax);
@@ -191,7 +191,7 @@ __global__ void kernel_Correlation_updateGradFirst(
             int s2o = stride2 * o;
             int s2p = stride2 * p;
             int idxbot1 = ((intSample * pbottomheight + (m+s2p)) * pbottomwidth + (l+s2o)) * channels + n;
-            float bot1tmp = rbot1[idxbot1]; // rbot1[l+s2o,m+s2p,n]
+            half bot1tmp = rbot1[idxbot1]; // rbot1[l+s2o,m+s2p,n]
             
             // Index offset for gradOutput in following loops:
             int op = (p+grid_radius) * grid_width + (o+grid_radius); // index[o,p]
@@ -208,7 +208,7 @@ __global__ void kernel_Correlation_updateGradFirst(
       }
       const int sumelems = (kernel_radius*2+1)*(kernel_radius*2+1)*bottomchannels;
       const int bot0index = ((n * bottomheight) + (m-padding)) * bottomwidth  + (l-padding);
-      gradFirst[bot0index + intSample*bottomcount] = sum / (float)sumelems;
+      gradFirst[bot0index + intSample*bottomcount] = sum / (half)sumelems;
     }
   }
 
@@ -225,9 +225,9 @@ __global__ void kernel_Correlation_updateGradSecond(
     const int stride2,
     const int pixels,
     const int intSample,
-    const float* rbot0,
-    const float* gradOutput,
-    float* gradSecond)
+    const half* rbot0,
+    const half* gradOutput,
+    half* gradSecond)
   { //CorrelateDataBackward1
     // round_off is a trick to enable integer division with ceil, even for negative numbers
     // We use a large offset, for the inner part not to become negative.
@@ -252,7 +252,7 @@ __global__ void kernel_Correlation_updateGradSecond(
       int l = (intIndex / bottomchannels) % bottomwidth + padding; // w-pos
       int m = (intIndex / bottomchannels / bottomwidth) % bottomheight + padding; // h-pos
       
-      float sum = 0;
+      half sum = 0;
       for (int p = -grid_radius; p <= grid_radius; p++) {
         for (int o = -grid_radius; o <= grid_radius; o++) {
           int s2o = stride2 * o;
@@ -276,7 +276,7 @@ __global__ void kernel_Correlation_updateGradSecond(
             
             // Get rbot0 data:
             int idxbot0 = ((intSample * pbottomheight + (m-s2p)) * pbottomwidth + (l-s2o)) * bottomchannels + n;
-            float bot0tmp = rbot0[idxbot0]; // rbot0[l+s2o,m+s2p,n]
+            half bot0tmp = rbot0[idxbot0]; // rbot0[l+s2o,m+s2p,n]
             
             // Index offset for gradOutput in following loops:
             int op = (p+grid_radius) * grid_width + (o+grid_radius); // index[o,p]
@@ -293,7 +293,7 @@ __global__ void kernel_Correlation_updateGradSecond(
       }
       const int sumelems = (kernel_radius*2+1)*(kernel_radius*2+1)*bottomchannels;
       const int bot1index = ((n * bottomheight) + (m-padding)) * bottomwidth  + (l-padding);
-      gradSecond[bot1index + intSample*bottomcount] = sum / (float)sumelems;
+      gradSecond[bot1index + intSample*bottomcount] = sum / (half)sumelems;
     } 
   }
 }

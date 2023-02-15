@@ -13,34 +13,35 @@ import platform
 import os
 import traceback
 import winsound
-from data_flow.KITTI_optical_flow import load_flow_from_png
-from data_flow.util import write_flow_png,load_flo
-from data_flow.listdataset import get_gt_correspondence_mask
-from pathlib import Path
 import imageio
 import numpy as np
 import zipfile
+#from data_flow.KITTI_optical_flow import load_flow_from_png
+from data_flow.util import write_flow_png,load_flo
+from data_flow.listdataset import get_gt_correspondence_mask
+from pathlib import Path
 
 if __name__ == '__main__':
     try:
-        path_train = Path('../../FlyingThings3D_subset/train/flow') 
-        path_test = Path('../../FlyingThings3D_subset/val/flow') 
+        dataset = Path('F:/workspaces/FlyingThings3D_subset_flow/FlyingThings3D_subset') 
+        root_dir = Path('F:/workspaces/CDVD-TSP/datasets/FlyingThings3D_subset')
         
-        for train_test_path in [path_train,path_test]:
-            for eye_path in train_test_path.iterdir():
+        for train_path in dataset.iterdir():
+            flow_path = train_path / 'flow'
+            for eye_path in flow_path.iterdir():
                 if eye_path.is_dir() and eye_path.name in ['left','right']:
                     print(eye_path.name)
                     for direction_path in eye_path.iterdir():
                         if direction_path.is_dir() and direction_path.name in ['into_future', 'into_past']:
                             print(direction_path.name)
-                            if direction_path.name == 'into_future':
-                                flow_direction = '-flow_01'
-                                dir_path = 'forward'
-                            else:
-                                flow_direction = '-flow_10'
-                                dir_path = 'backward'
-                            rootdir = eye_path / Path(dir_path)
-                            rootdir.mkdir(exist_ok=True)
+                            #if direction_path.name == 'into_future':
+                            #    flow_direction = '-flow_01'
+                            #    dir_path = 'forward'
+                            #else:
+                            #    flow_direction = '-flow_10'
+                            #    dir_path = 'backward'
+                            rootdir = root_dir / train_path.name / 'flow' / eye_path.name / direction_path.name
+                            rootdir.mkdir(parents=True, exist_ok=True)
                             for flow_path in direction_path.rglob('*.flo'):
                                 #print(flow_path)
                                 flow = load_flo(flow_path)
@@ -52,7 +53,7 @@ if __name__ == '__main__':
                                 #if np.amin(flow[:,:,1]) < -511 or np.amax(flow[:,:,1]) > 512 :
                                 #    print(flow_path, ' has w of between ', np.amin(flow[:,:,1]), ' and ', np.amax(flow[:,:,1]))
                                 #    exit()
-                                filename =  str(rootdir / Path(flow_path.stem + flow_direction + '.npz'))
+                                filename =  rootdir / (flow_path.stem + '.npz')
                                 print(filename)
                                 #f = gzip.GzipFile(filename, "w")
                                 mask = get_gt_correspondence_mask(flow)
