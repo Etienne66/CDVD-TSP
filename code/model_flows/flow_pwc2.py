@@ -50,13 +50,13 @@ class Flow_PWC2(nn.Module):
             tensorPreprocessedFirst = nn.functional.interpolate(
                                         input         = tensorFirst,
                                         size          = (intPreprocessedHeight, intPreprocessedWidth),
-                                        mode          = 'bicubic',
-                                        align_corners = False)
+                                        mode          = 'bilinear',
+                                        align_corners = True)
             tensorPreprocessedSecond = nn.functional.interpolate(
                                         input         = tensorSecond,
                                         size          = (intPreprocessedHeight, intPreprocessedWidth),
-                                        mode          = 'bicubic',
-                                        align_corners = False)
+                                        mode          = 'bilinear',
+                                        align_corners = True)
 
         # The flow returned by moduleNetwork is always one quarter the resolution of the original and is upscaled to the original
         # resolution
@@ -101,7 +101,7 @@ class Flow_PWC2(nn.Module):
         # Code was developed for 0.4.1
         output = nn.functional.grid_sample(x,
                                            grid,
-                                           mode='bicubic',
+                                           mode='bilinear',
                                            padding_mode  = 'border',
                                            align_corners = True)
         mask = torch.ones_like(x,
@@ -109,7 +109,7 @@ class Flow_PWC2(nn.Module):
                                requires_grad = True)
         mask = nn.functional.grid_sample(mask,
                                          grid,
-                                         mode='bicubic',
+                                         mode='bilinear',
                                          padding_mode  = 'border',
                                          align_corners = True)
 
@@ -148,8 +148,8 @@ def Backwarp(tensorInput, tensorFlow, requires_grad=False):
     Also refer to https://github.com/NVIDIA/flownet2-pytorch
     
     """
-    tensorHorizontal = torch.linspace(-1.0 + (1.0 / tensorFlow.shape[3]),
-                                      1.0 - (1.0 / tensorFlow.shape[3]),
+    tensorHorizontal = torch.linspace(-1.0,# + (1.0 / tensorFlow.shape[3]),
+                                      1.0,# - (1.0 / tensorFlow.shape[3]),
                                       tensorFlow.shape[3],
                                       device=tensorFlow.device,
                                       requires_grad=requires_grad
@@ -161,8 +161,8 @@ def Backwarp(tensorInput, tensorFlow, requires_grad=False):
                                                     1,
                                                     tensorFlow.shape[2],
                                                     1)
-    tensorVertical = torch.linspace(-1.0 + (1.0 / tensorFlow.shape[2]),
-                                    1.0 - (1.0 / tensorFlow.shape[2]),
+    tensorVertical = torch.linspace(-1.0,# + (1.0 / tensorFlow.shape[2]),
+                                    1.0,# - (1.0 / tensorFlow.shape[2]),
                                     tensorFlow.shape[2],
                                     device=tensorFlow.device,
                                     requires_grad=requires_grad
@@ -181,8 +181,10 @@ def Backwarp(tensorInput, tensorFlow, requires_grad=False):
                                                   tensorFlow.shape[2],
                                                   tensorFlow.shape[3]],
                                                  requires_grad=requires_grad)
-    tensorFlow = torch.cat([tensorFlow[:, 0:1, :, :] / ((tensorInput.shape[3] - 1.0) / 2.0),
-                            tensorFlow[:, 1:2, :, :] / ((tensorInput.shape[2] - 1.0) / 2.0)], 1)
+    #tensorFlow = torch.cat([tensorFlow[:, 0:1, :, :] / ((tensorInput.shape[3] - 1.0) / 2.0),
+    #                        tensorFlow[:, 1:2, :, :] / ((tensorInput.shape[2] - 1.0) / 2.0)], 1)
+    tensorFlow = torch.cat([tensorFlow[:, 0:1, :, :] * (2.0/(tensorInput.shape[3] - 1.0)),
+                            tensorFlow[:, 1:2, :, :] * (2.0/(tensorInput.shape[2] - 1.0))], 1)
     # Add the mask as the last channel of the input
     tensorInput = torch.cat([tensorInput, Backwarp_tensorPartial], 1)
 
@@ -190,9 +192,11 @@ def Backwarp(tensorInput, tensorFlow, requires_grad=False):
     #Changed padding_mode from zeros to border because we shouldn't assume that the motion stops at the border
     tensorOutput = nn.functional.grid_sample(input         = tensorInput,
                                              grid          = (Backwarp_tensorGrid + tensorFlow).permute(0, 2, 3, 1),
-                                             mode          = 'bicubic',
+                                             mode          = 'bilinear',
                                              padding_mode  = 'zeros',
-                                             align_corners = False)
+                                             #align_corners = False
+                                             align_corners = True
+                                             )
     # Extract the mask from the last channel of the output.
     # The mask is to filter out the parts of the image that a flow can't be calculated for. Normally around the edges of the image.
     tensorMask = tensorOutput[:, -1:, :, :];
@@ -211,145 +215,194 @@ class Extractor(nn.Module):
     Using Feature ↑ with 3 layers instead of 2 as the paper says
     Paper says it is using 7 level pyramids but 6 layers are used and appears to be what was used in the paper.
     """
-    def __init__(self, batchnorm=False, large_motion=False):
+    def __init__(self, args):
         super(Extractor, self).__init__()
+        self.useFlow1 = args.useFlow1
 
-        if large_motion:
-            m4Chan = 128
-            m5Chan = 256
-            m6Chan = 512
-        else:
-            m4Chan = 96
-            m5Chan = 128
-            m6Chan = 192
-        
-        if batchnorm:
-            self.moduleOne = nn.Sequential(
-                nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(16),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(16),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(16),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
-            )
-            self.moduleTwo = nn.Sequential(
-                nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(32),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(32),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(32),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
-            )
-            self.moduleThr = nn.Sequential(
-                nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
-            )
-            self.moduleFou = nn.Sequential(
-                nn.Conv2d(in_channels=64, out_channels=m4Chan, kernel_size=3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(m4Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m4Chan, out_channels=m4Chan, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(m4Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m4Chan, out_channels=m4Chan, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(m4Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
-            )
-            self.moduleFiv = nn.Sequential(
-                nn.Conv2d(in_channels=m4Chan, out_channels=m5Chan, kernel_size=3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(m5Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m5Chan, out_channels=m5Chan, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(m5Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m5Chan, out_channels=m5Chan, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(m5Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
-            )
-            # Author intended 192(32*6) but had used 196. 160(32*5) makes more sense since the prior levels were multiples of 32
-            # 32*0.5, 32*1, 32*2, 32*3, 32*4
-            self.moduleSix = nn.Sequential(
-                nn.Conv2d(in_channels=m5Chan, out_channels=m6Chan, kernel_size=3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(m6Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m6Chan, out_channels=m6Chan, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(m6Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m6Chan, out_channels=m6Chan, kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(m6Chan),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
-            )
-        else:
+        if args.useOrginalModel:
             self.moduleOne = nn.Sequential(
                 nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.LeakyReLU(inplace=True, negative_slope=0.1)
             )
             self.moduleTwo = nn.Sequential(
                 nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, stride=2, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.LeakyReLU(inplace=True, negative_slope=0.1)
             )
             self.moduleThr = nn.Sequential(
                 nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=2, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.LeakyReLU(inplace=True, negative_slope=0.1)
             )
             self.moduleFou = nn.Sequential(
                 nn.Conv2d(in_channels=64, out_channels=m4Chan, kernel_size=3, stride=2, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=m4Chan, out_channels=m4Chan, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=m4Chan, out_channels=m4Chan, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.LeakyReLU(inplace=True, negative_slope=0.1)
             )
             self.moduleFiv = nn.Sequential(
                 nn.Conv2d(in_channels=m4Chan, out_channels=m5Chan, kernel_size=3, stride=2, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=m5Chan, out_channels=m5Chan, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=m5Chan, out_channels=m5Chan, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.LeakyReLU(inplace=True, negative_slope=0.1)
             )
             # Author intended 192(32*6) but had used 196. 160(32*5) makes more sense since the prior levels were multiples of 32
             # 32*0.5, 32*1, 32*2, 32*3, 32*4
             self.moduleSix = nn.Sequential(
                 nn.Conv2d(in_channels=m5Chan, out_channels=m6Chan, kernel_size=3, stride=2, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=m6Chan, out_channels=m6Chan, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.LeakyReLU(inplace=True, negative_slope=0.1),
                 nn.Conv2d(in_channels=m6Chan, out_channels=m6Chan, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.LeakyReLU(inplace=True, negative_slope=0.1)
             )
+        else:
+            TempList = [
+                nn.Conv2d(in_channels=3, out_channels=args.EC[0], kernel_size=3, stride=2, padding=1),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[0],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[0], out_channels=args.EC[0], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[0],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[0], out_channels=args.EC[0], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[0],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[0], out_channels=args.EC[0], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[0],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[0]) if args.batchnorm2 else None
+            ]
+            TempListClean = [x for x in TempList if x is not None] #Remove blank items
+            self.moduleOne = nn.Sequential(*TempListClean)
+            TempList = (
+                nn.Conv2d(in_channels=args.EC[0], out_channels=args.EC[1], kernel_size=3, stride=2, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[1],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[1], out_channels=args.EC[1], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[1],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[1], out_channels=args.EC[1], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[1],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[1], out_channels=args.EC[1], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[1],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[1]) if args.batchnorm2 else None
+            )
+            TempListClean = [x for x in TempList if x is not None] #Remove blank items
+            self.moduleTwo = nn.Sequential(*TempListClean)
+            TempList = (
+                nn.Conv2d(in_channels=args.EC[1], out_channels=args.EC[2], kernel_size=3, stride=2, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[2],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[2], out_channels=args.EC[2], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[2],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[2], out_channels=args.EC[2], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[2],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[2], out_channels=args.EC[2], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[2],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[2]) if args.batchnorm2 else None
+            )
+            TempListClean = [x for x in TempList if x is not None] #Remove blank items
+            self.moduleThr = nn.Sequential(*TempListClean)
+            TempList = (
+                nn.Conv2d(in_channels=args.EC[2], out_channels=args.EC[3], kernel_size=3, stride=2, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[3],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[3], out_channels=args.EC[3], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[3],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[3], out_channels=args.EC[3], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[3],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[3], out_channels=args.EC[3], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[3],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[3]) if args.batchnorm2 else None
+            )
+            TempListClean = [x for x in TempList if x is not None] #Remove blank items
+            self.moduleFou = nn.Sequential(*TempListClean)
+            TempList = (
+                nn.Conv2d(in_channels=args.EC[3], out_channels=args.EC[4], kernel_size=3, stride=2, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[4],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[4], out_channels=args.EC[4], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[4],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[4], out_channels=args.EC[4], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[4],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[4], out_channels=args.EC[4], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[4],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[4]) if args.batchnorm2 else None
+            )
+            TempListClean = [x for x in TempList if x is not None] #Remove blank items
+            self.moduleFiv = nn.Sequential(*TempListClean)
+            # Author intended 192(32*6) but had used 196. 160(32*5) makes more sense since the prior levels were multiples of 32
+            # 32*0.5, 32*1, 32*2, 32*3, 32*4
+            TempList = (
+                nn.Conv2d(in_channels=args.EC[4], out_channels=args.EC[5], kernel_size=3, stride=2, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[5],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[5], out_channels=args.EC[5], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[5],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[5], out_channels=args.EC[5], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[5],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm2 else None,
+                nn.Conv2d(in_channels=args.EC[5], out_channels=args.EC[5], kernel_size=3, stride=1, padding=1, bias=False if args.batchnorm else True),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm else None,
+                nn.PReLU(num_parameters=args.EC[5],init=0.1) if args.usePReLu else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.BatchNorm2d(args.EC[5]) if args.batchnorm2 else None
+            )
+            TempListClean = [x for x in TempList if x is not None] #Remove blank items
+            self.moduleSix = nn.Sequential(*TempListClean)
         
         # Original Caffe model used MSRA. This is also known as Kaiming
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
                 nn.init.kaiming_normal_(m.weight, 0.1)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0) 
         
     # end
 
@@ -362,8 +415,10 @@ class Extractor(nn.Module):
         tensorSix = self.moduleSix(tensorFiv)
 
         # Removed tensorOne from return because it wasn't used
-        return [tensorOne, tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
-        #return [tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
+        if self.useFlow1:
+            return [tensorOne, tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
+        else:
+            return [tensorTwo, tensorThr, tensorFou, tensorFiv, tensorSix]
     # end
 # end
 
@@ -374,135 +429,121 @@ class Decoder(nn.Module):
     """
     def __init__(self,
                  intLevel,
-                 device           = 'cuda',
-                 div_flow         = 20,
-                 max_displacement = 4,
-                 batchnorm        = False,
-                 large_motion     = False,
-                 useResidual      = False,
-                 useDenseNet      = False,
-                 mixed_precision  = False):
+                 args):
         super(Decoder, self).__init__()
-        self.device=device
-        self.max_displacement = 4
-        self.div_flow = div_flow
-        self.useResidual = useResidual
-        self.useDenseNet = useDenseNet
-        self.max_displacement = max_displacement
-        correlation_channels = (max_displacement * 2 + 1) ** 2;
+        self.device=args.device
+        self.div_flow = args.div_flow
+        self.intLevel = intLevel
+        self.useResidual = args.useResidual
+        self.FullScale = args.FullScale
+        self.useDenseNet = args.useDenseNet
+        self.scale_supervision = args.scale_supervision
+        self.max_displacement = args.max_displacement[intLevel - 1]
+        correlation_channels_previous = (args.max_displacement[intLevel - 2] * 2 + 1) ** 2;
+        correlation_channels = (args.max_displacement[intLevel - 1] * 2 + 1) ** 2;
+        self.correlation_channels = correlation_channels
+        xD = self.xD = args.DenseNetSize
 
-        if useResidual:
+        if args.useResidual:
             residualChannels = 2
         else:
             residualChannels = 0
 
-        if False:
-            m1Chan = 128
-            intChannels = [None,
-                           correlation_channels +  32 + 2 + residualChannels,
-                           correlation_channels +  64 + 2 + residualChannels, 
-                           correlation_channels +  96 + 2 + residualChannels,
-                           correlation_channels + 128 + 2 + residualChannels,
-                           correlation_channels + 160 + 2 + residualChannels,
-                           correlation_channels + 192,
-                           None]
-        elif large_motion:
-            m1Chan = 160
-            intChannels = [None,
-                           correlation_channels +  16 + 2 + residualChannels, #101
-                           correlation_channels +  32 + 2 + residualChannels, #117 
-                           correlation_channels +  64 + 2 + residualChannels, #149
-                           correlation_channels + 128 + 2 + residualChannels, #213
-                           correlation_channels + 256 + 2 + residualChannels, #341
-                           correlation_channels + 512,         #593
-                           None]
-        else:
-            m1Chan = 128
-            intChannels = [None,
-                           correlation_channels +  16 + 2 + residualChannels, #101
-                           correlation_channels +  32 + 2 + residualChannels, #117
-                           correlation_channels +  64 + 2 + residualChannels, #149
-                           correlation_channels +  96 + 2 + residualChannels, #181
-                           correlation_channels + 128 + 2 + residualChannels, #213
-                           correlation_channels + 192,         #273
-                           None]
-
+        m1Chan = 128
+        intChannels = [None,
+                       correlation_channels_previous + args.EC[0] + 2 + residualChannels,
+                       correlation_channels_previous + args.EC[1] + 2 + residualChannels, 
+                       correlation_channels_previous + args.EC[2] + 2 + residualChannels,
+                       correlation_channels_previous + args.EC[3] + 2 + residualChannels,
+                       correlation_channels_previous + args.EC[4] + 2 + residualChannels,
+                       correlation_channels_previous + args.EC[5],
+                       None]
         intPrevious = intChannels[intLevel + 1]
+        intChannels = [None,
+                       correlation_channels + args.EC[0] + 2 + residualChannels,
+                       correlation_channels + args.EC[1] + 2 + residualChannels, 
+                       correlation_channels + args.EC[2] + 2 + residualChannels,
+                       correlation_channels + args.EC[3] + 2 + residualChannels,
+                       correlation_channels + args.EC[4] + 2 + residualChannels,
+                       correlation_channels + args.EC[5],
+                       None]
         intCurrent  = intChannels[intLevel + 0]
 
-        corr_channels = [None, 16, 32, 64, 96, 128, 192, None][intLevel + 0]
-
         if intLevel < 6:
-            if useDenseNet:
-                #self.moduleUpflow = nn.ConvTranspose2d(in_channels  = 2,
-                #                                       out_channels = 2,
-                #                                       kernel_size  = 4,
-                #                                       stride       = 2, # Double resolution
-                #                                       padding      = 1)
-                #    
-                #self.moduleUpfeat = nn.ConvTranspose2d(in_channels  = intPrevious + m1Chan + 128 + 96 + 64 + 32,
-                #                                       out_channels = 2,
-                #                                       kernel_size  = 4,
-                #                                       stride       = 2, # Double resolution
-                #                                       padding      = 1)
-                self.moduleUpflow = nn.Sequential(nn.Upsample(scale_factor  = 2,
-                                                              mode          = 'bicubic'),
-                                                  nn.Conv2d(in_channels  = 2,
-                                                            out_channels = 2,
-                                                            kernel_size  = 3,
-                                                            stride       = 1,
-                                                            padding      = 1))
-                self.moduleUpfeat = nn.Sequential(nn.Upsample(scale_factor  = 2,
-                                                              mode          = 'bicubic'),
-                                                  nn.Conv2d(in_channels  = intPrevious + m1Chan + 128 + 96 + 64 + 32,
-                                                            out_channels = 2,
-                                                            kernel_size  = 3,
-                                                            stride       = 1,
-                                                            padding      = 1))
+            if args.useOrginalModel:
+                self.moduleUpflow = nn.ConvTranspose2d(in_channels  = 2,
+                                                       out_channels = 2,
+                                                       kernel_size  = 4,
+                                                       stride       = 2, # Double resolution
+                                                       padding      = 1)
             else:
-                #self.moduleUpflow = nn.ConvTranspose2d(in_channels  = 2,
-                #                                       out_channels = 2,
-                #                                       kernel_size  = 4,
-                #                                       stride       = 2, # Double resolution
-                #                                       padding      = 1)
-                self.moduleUpflow = nn.Upsample(scale_factor  = 2,
-                                                mode          = 'bicubic')
-                    
-                self.moduleUpfeat = nn.Sequential(nn.Upsample(scale_factor  = 2,
-                                                              mode          = 'bicubic'),
-                                                  nn.Conv2d(in_channels  = 32,
+                self.moduleUpflow = nn.Sequential(nn.PReLU(num_parameters=2,init=0.1),
+                                                  nn.ConvTranspose2d(in_channels  = 2,
+                                                                     out_channels = 2,
+                                                                     kernel_size  = 4,
+                                                                     stride       = 2, # Double resolution
+                                                                     padding      = 1))
+            if args.useResidual:
+                if args.useDenseNet:
+                    if args.useOrginalModel:
+                        self.moduleUpfeat = nn.ConvTranspose2d(in_channels  = intPrevious + m1Chan + 128 + 96 + 64 + 32,
                                                             out_channels = 2,
-                                                            kernel_size  = 3,
-                                                            stride       = 1,
-                                                            padding      = 1))
-                #self.moduleUpfeat = nn.ConvTranspose2d(in_channels  = intPrevious,
-                #                                       out_channels = 2,
-                #                                       kernel_size  = 4,
-                #                                       stride       = 2, # Double resolution
-                #                                       padding      = 1)
+                                                            kernel_size  = 4,
+                                                            stride       = 2, # Double resolution
+                                                            padding      = 1)
+                    else:
+                        self.moduleUpfeat = nn.Sequential(nn.ConvTranspose2d(in_channels  = 16**xD * intPrevious + 8**xD * m1Chan + 4**xD * 128 + 2**xD * 96 + 64 + 32,
+                                                                             out_channels = 2,
+                                                                             kernel_size  = 4,
+                                                                             stride       = 2, # Double resolution
+                                                                             padding      = 1),
+                                                          nn.PReLU(num_parameters=2,init=0.1))
+                else:
+                    if args.useOrginalModel:
+                        self.moduleUpfeat = nn.ConvTranspose2d(in_channels  = intPrevious,
+                                                               out_channels = 2,
+                                                               kernel_size  = 4,
+                                                               stride       = 2, # Double resolution
+                                                               padding      = 1)
+                    else:
+                        self.moduleUpfeat = nn.Sequential(nn.ConvTranspose2d(in_channels  = 32,
+                                                                             out_channels = 2,
+                                                                             kernel_size  = 4,
+                                                                             stride       = 2, # Double resolution
+                                                                             padding      = 1),
+                                                          nn.PReLU(num_parameters=2,init=0.1))
             # Start with inLevel 6(None), 5(20/32=0.625), 4(20/16=1.25), 3(20/8=2.5) and finally 2(20/4=5.0)
             # 6 doesn't have an objectPrevious so doesn't need a value. 2 is the last.
             # Add 1(20/2=10.0)
             #self.dblBackwarp = [None, None, 10.0, 5.0, 2.5, 1.25, 0.625, None][intLevel + 1]
-            self.dblBackwarp = [None, div_flow/1, div_flow/2, div_flow/4, div_flow/8, div_flow/16, div_flow/32, div_flow/64][intLevel + 1]
+            if self.scale_supervision:
+                self.dblBackwarp = 1
+            else:
+                self.dblBackwarp = [None,
+                                    self.div_flow/1,
+                                    self.div_flow/2,
+                                    self.div_flow/4,
+                                    self.div_flow/8,
+                                    self.div_flow/16,
+                                    self.div_flow/32,
+                                    self.div_flow/64][intLevel + 1]
 
         
-        self.leakyrelu = nn.LeakyReLU(inplace=False, negative_slope=0.1)
         
         
-        if batchnorm:
+        if args.useOrginalModel:
+            self.leakyrelu = nn.LeakyReLU(inplace=False, negative_slope=0.1)
             self.correlation = nn.Sequential(
-                correlation2.ModuleCorrelation(padding          = max_displacement,
+                correlation2.ModuleCorrelation(padding          = args.max_displacement[intLevel - 1],
                                                kernel_size      = 1,
-                                               max_displacement = max_displacement,
+                                               max_displacement = self.max_displacement,
                                                stride1          = 1,
                                                stride2          = 1,
-                                               device           = device,
-                                               mixed_precision  = mixed_precision),
-                nn.BatchNorm2d(correlation_channels),
+                                               device           = args.device,
+                                               mixed_precision  = args.mixed_precision),
                 nn.LeakyReLU(inplace=False, negative_slope=0.1)
             )
-            if useDenseNet:
+            if args.useDenseNet:
                 self.moduleOne = nn.Sequential(
                     nn.Conv2d(in_channels  = intCurrent,
                               out_channels = m1Chan,
@@ -510,7 +551,6 @@ class Decoder(nn.Module):
                               stride       = 1,
                               padding      = 1,
                               bias         = False),
-                    nn.BatchNorm2d(m1Chan),
                     nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
                 self.moduleTwo = nn.Sequential(
@@ -520,7 +560,6 @@ class Decoder(nn.Module):
                               stride       = 1,
                               padding      = 1,
                               bias         = False),
-                    nn.BatchNorm2d(128),
                     nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
                 self.moduleThr = nn.Sequential(
@@ -530,7 +569,6 @@ class Decoder(nn.Module):
                               stride       = 1,
                               padding      = 1,
                               bias         = False),
-                    nn.BatchNorm2d(96),
                     nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
                 self.moduleFou = nn.Sequential(
@@ -540,7 +578,6 @@ class Decoder(nn.Module):
                               stride       = 1,
                               padding      = 1,
                               bias         = False),
-                    nn.BatchNorm2d(64),
                     nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
                 self.moduleFiv = nn.Sequential(
@@ -550,52 +587,28 @@ class Decoder(nn.Module):
                               stride       = 1,
                               padding      = 1,
                               bias         = False),
-                    nn.BatchNorm2d(32),
                     nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
                 self.moduleSix = nn.Sequential(
-                    #nn.Upsample(scale_factor = 2,
-                    #            mode         = 'bicubic'). # Double Resolution
                     nn.Conv2d(in_channels  = intCurrent + m1Chan + 128 + 96 + 64 + 32,
                               out_channels = 2,
                               kernel_size  = 3,
                               stride       = 1,
                               padding      = 1,
-                              bias         = False),
-                    nn.BatchNorm2d(2)
+                              bias         = False)
                 )
-            else:
-                self.noDenseNet = torch.nn.Sequential(
-                    nn.Conv2d(in_channels=intCurrent, out_channels=m1Chan, kernel_size=3, stride=1, padding=1, bias = False),
-                    nn.BatchNorm2d(m1Chan),
-                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    nn.Conv2d(in_channels=m1Chan, out_channels=128, kernel_size=3, stride=1, padding=1, bias = False),
-                    nn.BatchNorm2d(128),
-                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=1, bias = False),
-                    nn.BatchNorm2d(96),
-                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    nn.Conv2d(in_channels=96, out_channels=64, kernel_size=3, stride=1, padding=1, bias = False),
-                    nn.BatchNorm2d(64),
-                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                    nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1, bias = False),
-                    nn.BatchNorm2d(32),
-                    nn.LeakyReLU(inplace=False, negative_slope=0.1)
-                )
-                self.moduleSix = torch.nn.Sequential(
-                    #nn.Upsample(scale_factor = 2, mode = 'bicubic'), # Double Resolution
-                    nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, bias = False),
-                    nn.BatchNorm2d(2)
-                )
-        elif useDenseNet:
+        elif args.useDenseNet:
+            self.leakyrelu = nn.PReLU(num_parameters=2,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1)
+            #print('self.max_displacement',self.max_displacement)
+            #print('correlation_channels',correlation_channels)
             self.correlation = nn.Sequential(
-                correlation2.ModuleCorrelation(padding = max_displacement,
+                correlation2.ModuleCorrelation(padding = self.max_displacement,
                                                kernel_size = 1,
-                                               max_displacement = max_displacement,
+                                               max_displacement = self.max_displacement,
                                                stride1 = 1,
                                                stride2 = 1,
-                                               device = device),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                                               device = args.device),
+                nn.PReLU(num_parameters=correlation_channels,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1)
             )
             self.moduleOne = nn.Sequential(
                 nn.Conv2d(in_channels  = intCurrent,
@@ -603,7 +616,9 @@ class Decoder(nn.Module):
                           kernel_size  = 3,
                           stride       = 1,
                           padding      = 1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.PReLU(num_parameters=m1Chan,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                #nn.Conv2d(in_channels = m1Chan, out_channels = m1Chan, kernel_size = 3, stride = 1, padding = 1),
+                #nn.PReLU(num_parameters=m1Chan,init=0.1)
             )
             self.moduleTwo = nn.Sequential(
                 nn.Conv2d(in_channels  = intCurrent + m1Chan,
@@ -611,100 +626,176 @@ class Decoder(nn.Module):
                           kernel_size  = 3,
                           stride       = 1,
                           padding      = 1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.PReLU(num_parameters=128,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                #nn.Conv2d(in_channels = 128, out_channels = 128, kernel_size = 3, stride = 1, padding = 1),
+                #nn.PReLU(num_parameters=128,init=0.1)
             )
             self.moduleThr = nn.Sequential(
-                nn.Conv2d(in_channels  = intCurrent + m1Chan + 128,
+                nn.Conv2d(in_channels  = 2**xD * intCurrent + m1Chan + 128,
                           out_channels = 96,
                           kernel_size  = 3,
                           stride       = 1,
                           padding      = 1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.PReLU(num_parameters=96,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                #nn.Conv2d(in_channels = 96, out_channels = 96, kernel_size = 3, stride = 1, padding = 1),
+                #nn.PReLU(num_parameters=96,init=0.1)
             )
             self.moduleFou = nn.Sequential(
-                nn.Conv2d(in_channels  = intCurrent + m1Chan + 128 + 96,
+                nn.Conv2d(in_channels  = 4**xD * intCurrent + 2**xD * m1Chan + 128 + 96,
                           out_channels = 64,
                           kernel_size  = 3,
                           stride       = 1,
                           padding      = 1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.PReLU(num_parameters=64,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                #nn.Conv2d(in_channels = 64, out_channels = 64, kernel_size = 3, stride = 1, padding = 1),
+                #nn.PReLU(num_parameters=64,init=0.1)
             )
             self.moduleFiv = nn.Sequential(
-                nn.Conv2d(in_channels  = intCurrent + m1Chan + 128 + 96 + 64,
+                nn.Conv2d(in_channels  = 8**xD * intCurrent + 4**xD * m1Chan + 2**xD * 128 + 96 + 64,
                           out_channels = 32,
                           kernel_size  = 3,
                           stride       = 1,
                           padding      = 1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                #nn.Conv2d(in_channels = 32, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),
+                #nn.PReLU(num_parameters=32,init=0.1)
             )
-            self.moduleSix = nn.Sequential(
-                nn.Upsample(scale_factor = 2,
-                            mode         = 'bicubic'), # Double Resolution
-                nn.Conv2d(in_channels  = intCurrent + m1Chan + 128 + 96 + 64 + 32,
-                          out_channels = 2,
-                          kernel_size  = 3,
-                          stride       = 1,
-                          padding      = 1)
-               
-            )
+            if args.useResidual:
+                self.moduleSix = nn.Sequential(
+                    nn.Conv2d(in_channels  = 16**xD * intCurrent + 8**xD * m1Chan + 4**xD * 128 + 2**xD * 96 + 64 + 32,
+                              out_channels = 2,
+                              kernel_size  = 3,
+                              stride       = 1,
+                              padding      = 1),
+                nn.PReLU(num_parameters=2,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.Conv2d(in_channels = 2, out_channels = 2, kernel_size = 3, stride = 1, padding = 1),
+                )
+            else:
+                if args.FullScale and intLevel == 2:
+                    self.moduleSix = nn.Sequential(
+                        nn.Conv2d(in_channels  = 16**xD * intCurrent + 8**xD * m1Chan + 4**xD * 128 + 2**xD * 96 + 64 + 32,
+                                  out_channels = 64,
+                                  kernel_size  = 3,
+                                  stride       = 1,
+                                  padding      = 1),
+                        nn.PReLU(num_parameters=64,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 64, out_channels = 64, kernel_size = 3, stride = 1, padding = 1),
+                        nn.PReLU(num_parameters=64,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 64, out_channels = 64, kernel_size = 3, stride = 1, padding = 1),
+                        nn.PReLU(num_parameters=64,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.ConvTranspose2d(in_channels = 64, out_channels = 64, kernel_size = 4, stride = 2, padding = 1), # Double resolution
+                        nn.PReLU(num_parameters=64,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 64, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),
+                        nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 32, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),
+                        nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.ConvTranspose2d(in_channels = 32, out_channels = 32, kernel_size = 4, stride = 2, padding = 1), # Double resolution
+                        nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 32, out_channels = 2, kernel_size = 3, stride = 1, padding = 1),
+                    )
+                else:
+                    self.moduleSix = nn.Sequential(
+                        nn.Conv2d(in_channels  = 16**xD * intCurrent + 8**xD * m1Chan + 4**xD * 128 + 2**xD * 96 + 64 + 32,
+                                  out_channels = 32,
+                                  kernel_size  = 3,
+                                  stride       = 1,
+                                  padding      = 1),
+                        nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 32, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),
+                        nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 32, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),
+                        nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.ConvTranspose2d(in_channels = 32, out_channels = 32, kernel_size = 4, stride = 2, padding = 1), # Double resolution
+                        nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                        nn.Conv2d(in_channels = 32, out_channels = 2, kernel_size = 3, stride = 1, padding = 1),
+                    )
         else:
+            self.leakyrelu = nn.PReLU(num_parameters=2,init=0.1)
             self.correlation = nn.Sequential(
-                correlation2.ModuleCorrelation(padding = max_displacement,
-                                               kernel_size = 1,
-                                               max_displacement = max_displacement,
-                                               stride1 = 1,
-                                               stride2 = 1,
-                                               device = device),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                correlation2.ModuleCorrelation(padding          = self.max_displacement,
+                                               kernel_size      = 1,
+                                               max_displacement = self.max_displacement,
+                                               stride1          = 1,
+                                               stride2          = 1,
+                                               device           = args.device),
+                nn.PReLU(num_parameters=correlation_channels,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1)
             )
             self.noDenseNet = torch.nn.Sequential(
                 nn.Conv2d(in_channels=intCurrent, out_channels=m1Chan, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=m1Chan,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
                 nn.Conv2d(in_channels=m1Chan, out_channels=128, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=128,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
                 nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=96,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
                 nn.Conv2d(in_channels=96, out_channels=64, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=64,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
                 nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1)
+                nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1)
             )
-            self.moduleSix = torch.nn.Sequential(
-                #nn.Upsample(scale_factor = 2, mode = 'bicubic'), # Double Resolution
-                nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1)
-            )
+            if args.useResidual:
+                self.moduleSix = nn.Sequential(
+                    nn.Conv2d(in_channels  = 32,
+                              out_channels = 2,
+                              kernel_size  = 3,
+                              stride       = 1,
+                              padding      = 1)
+                )
+            elif args.FullScale and intLevel == 2:
+                self.moduleSix = nn.Sequential(
+                    #nn.Upsample(scale_factor = 2,
+                    #            mode         = 'bilinear'), # Double Resolution
+                    nn.ConvTranspose2d(in_channels  = 32,
+                                       out_channels = 16,
+                                       kernel_size  = 4,
+                                       stride       = 2, # Double resolution
+                                       padding      = 1),
+                    nn.PReLU(num_parameters=16,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels  = 16,
+                              out_channels = 16,
+                              kernel_size  = 3,
+                              stride       = 1,
+                              padding      = 1),
+                    nn.PReLU(num_parameters=16,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.ConvTranspose2d(in_channels  = 16,
+                                       out_channels = 16,
+                                       kernel_size  = 4,
+                                       stride       = 2, # Double resolution
+                                       padding      = 1),
+                    nn.PReLU(num_parameters=16,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels  = 16,
+                              out_channels = 2,
+                              kernel_size  = 3,
+                              stride       = 1,
+                              padding      = 1)
+                )
+            else:
+                self.moduleSix = nn.Sequential(
+                    #nn.Upsample(scale_factor = 2,
+                    #            mode         = 'bilinear'), # Double Resolution
+                    nn.ConvTranspose2d(in_channels  = 32,
+                                       out_channels = 32,
+                                       kernel_size  = 4,
+                                       stride       = 2, # Double resolution
+                                       padding      = 1),
+                    nn.PReLU(num_parameters=32,init=0.1) if args.usePReLuD else nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels  = 32,
+                              out_channels = 2,
+                              kernel_size  = 3,
+                              stride       = 1,
+                              padding      = 1)
+                )
 
         # Original Caffe model used MSRA. This is also known as Kaiming
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
                 nn.init.kaiming_normal_(m.weight, 0.1)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0) 
 
     # end
-
-    def compute_cost_volume(self, feat1, feat2):
-        """
-        only implemented for:
-            kernel_size = 1
-            stride1 = 1
-            stride2 = 1
-        """
-
-        max_disp = self.max_displacement
-
-        _, _, height, width = feat1.size()
-        num_shifts = 2 * max_disp + 1
-        feat2_padded = F.pad(feat2, (max_disp, max_disp, max_disp, max_disp), "constant", 0)
-
-        cost_list = []
-        for i in range(num_shifts):
-            for j in range(num_shifts):
-                corr = torch.mean(feat1 * feat2_padded[:, :, i:(height + i), j:(width + j)], dim=1, keepdim=True)
-                cost_list.append(corr)
-        cost_volume = torch.cat(cost_list, dim=1)
-        return cost_volume
-
 
     def forward(self, tensorFirst, tensorSecond, objectPrevious):
         tensorFlow = None
@@ -712,73 +803,80 @@ class Decoder(nn.Module):
 
         if objectPrevious is None:
             tensorFlow = None
-            tensorFeat = None
+            tensorFeat0 = None
 
             #Cost volume layer. Output is always 81 channels
             tensorCor = torch.stack((tensorFirst, tensorSecond), dim=1)
             tensorVolume = self.correlation(tensorCor)
-            #tensorVolume = self.leakyrelu(self.compute_cost_volume(tensorFirst, tensorSecond))
             #Cost volume layer. Output is always 81 channels
             #tensorVolume =  self.leakyrelu(correlation.FunctionCorrelation(tensorFirst  = tensorFirst,
             #                                                               tensorSecond = tensorSecond))
 
-            tensorFeat = torch.cat([tensorVolume, tensorFirst], 1)
+            tensorFeat0 = torch.cat([tensorVolume, tensorFirst], 1)
 
         elif objectPrevious is not None:
             if self.useResidual:
                 #if self.useDenseNet:
                 #else:
-                tensorFlow = objectPrevious['tensorFlow'] # 2 channels & double resolution
-                #tensorFlow = self.moduleUpflow(objectPrevious['tensorFlow']) # 2 channels & double resolution
+                #tensorFlow = objectPrevious['tensorFlow'] # 2 channels & double resolution
+                tensorFlow = self.moduleUpflow(objectPrevious['tensorFlow']) # 2 channels & double resolution
                 #Residual Connections Flow Increment. Reduced to 2 channels & double resolution
-                tensorFeat = self.moduleUpfeat(objectPrevious['tensorFeat'])
+                tensorFeatUp = self.moduleUpfeat(objectPrevious['tensorFeat'])
                 #tensorFeat = objectPrevious['tensorFeat']
                 # Warping layer of Flow Increment
                 tensorWarp = Backwarp(tensorInput   = tensorSecond,
                                       tensorFlow    = tensorFlow * self.dblBackwarp, #self.dblBackwarp,
                                       requires_grad = self.training)
             else:
-                #if self.useDenseNet:
-                #    tensorFlow = self.moduleUpflow(objectPrevious['tensorFlow']) # 2 channels & double resolution
-                #else:
+                #tensorFlow = self.moduleUpflow(objectPrevious['tensorFlow']) # 2 channels & double resolution
                 tensorFlow = objectPrevious['tensorFlow'] # 2 channels
                 # Warping layer of Flow Increment
                 tensorWarp = Backwarp(tensorInput   = tensorSecond,
                                       tensorFlow    = tensorFlow * self.dblBackwarp, #self.dblBackwarp,self.div_flow
-                                      #tensorFlow    = objectPrevious['tensorFlow'] * self.dblBackwarp,
                                       requires_grad = self.training)
 
             #Cost volume layer. Output is always 81 channels
             tensorCor = torch.stack((tensorFirst, tensorWarp), dim=1)
             tensorVolume = self.correlation(tensorCor)
-            #tensorVolume = self.leakyrelu(self.compute_cost_volume(tensorFirst, tensorWarp))
             #tensorVolume = self.leakyrelu(correlation.FunctionCorrelation(tensorFirst  = tensorFirst,
             #                                                              tensorSecond = tensorWarp))
 
             if self.useResidual:
-                tensorFeat = torch.cat([tensorFirst, tensorVolume, tensorFlow, tensorFeat], 1)
+                tensorFeat0 = torch.cat([tensorFirst, tensorVolume, self.leakyrelu(tensorFlow), tensorFeatUp], 1)
+                #tensorFeat = torch.cat([tensorFirst, tensorVolume, tensorFlow, tensorFeat], 1)
             else:
-                tensorFeat = torch.cat([tensorFirst, tensorVolume, tensorFlow], 1)
+                tensorFeat0 = torch.cat([tensorFirst, tensorVolume, self.leakyrelu(tensorFlow)], 1)
+                #tensorFeat = torch.cat([tensorFirst, tensorVolume, tensorFlow], 1)
         # end
 
         # Concatenating the previous features with the current features is a DenseNet connection
         # This is the CNN
         
-        if self.useDenseNet:
-            tensorFeat = torch.cat([self.moduleOne(tensorFeat), tensorFeat], 1)
-            tensorFeat = torch.cat([self.moduleTwo(tensorFeat), tensorFeat], 1)
-            tensorFeat = torch.cat([self.moduleThr(tensorFeat), tensorFeat], 1)
-            tensorFeat = torch.cat([self.moduleFou(tensorFeat), tensorFeat], 1)
-            tensorFeat = torch.cat([self.moduleFiv(tensorFeat), tensorFeat], 1)
-            tensorFlow = self.moduleSix(tensorFeat) #* 1 #* 2
+        if self.useDenseNet and self.xD == 0:
+            tensorFeat1 = torch.cat([self.moduleOne(tensorFeat0), tensorFeat0], 1)
+            tensorFeat2 = torch.cat([self.moduleTwo(tensorFeat1), tensorFeat1], 1)
+            tensorFeat3 = torch.cat([self.moduleThr(tensorFeat2), tensorFeat2], 1)
+            tensorFeat4 = torch.cat([self.moduleFou(tensorFeat3), tensorFeat3], 1)
+            tensorFeat = torch.cat([self.moduleFiv(tensorFeat4), tensorFeat4], 1)
+        elif self.useDenseNet and self.xD == 1:
+            tensorFeat1 = torch.cat([self.moduleOne(tensorFeat0), tensorFeat0], 1)
+            tensorFeat2 = torch.cat([self.moduleTwo(tensorFeat1), tensorFeat1, tensorFeat0], 1)
+            tensorFeat3 = torch.cat([self.moduleThr(tensorFeat2), tensorFeat2, tensorFeat1, tensorFeat0], 1)
+            tensorFeat4 = torch.cat([self.moduleFou(tensorFeat3), tensorFeat3, tensorFeat2, tensorFeat1, tensorFeat0], 1)
+            tensorFeat = torch.cat([self.moduleFiv(tensorFeat4), tensorFeat4, tensorFeat3, tensorFeat2, tensorFeat1, tensorFeat0], 1)
         else:
-            tensorFeat = self.noDenseNet(tensorFeat)
-            tensorFlow = self.moduleSix(tensorFeat) #* 1 #* 2
+            tensorFeat = self.noDenseNet(tensorFeat0)
 
-        return {
-            'tensorFlow': tensorFlow,
-            'tensorFeat': tensorFeat
-        }
+        if self.FullScale and self.intLevel == 2 and self.scale_supervision:
+            tensorFlow = self.moduleSix(tensorFeat) * 4
+        elif self.scale_supervision:
+            tensorFlow = self.moduleSix(tensorFeat) * 2
+        else:
+            tensorFlow = self.moduleSix(tensorFeat)
+
+        return {'tensorFlow': tensorFlow,
+                'tensorFeat': tensorFeat
+               }
     # end
 # end
 
@@ -786,18 +884,16 @@ class Refiner(nn.Module):
     """The context network. Each convolutional layer is followed by a leaky ReLU unit except the last one that outputs the
     optical flow. The last number in each convolutional layer denotes the dilation constant.
     """
-    def __init__(self,
-                 batchnorm        = False,
-                 useFlow1         = False,
-                 large_motion     = False,
-                 useResidual      = False,
-                 useDenseNet      = False,
-                 max_displacement = 4):
+    def __init__(self, args):
         super(Refiner, self).__init__()
-        correlation_channels = (max_displacement * 2 + 1) ** 2;
+        correlation_channels = (args.max_displacement[1] * 2 + 1) ** 2;
+        xD = args.DenseNetSize
+        self.scale_supervision = args.scale_supervision
+        self.FullScale = args.FullScale
+        print('correlation_channels:', correlation_channels)
         
         flowChannels = 0
-        if useResidual:
+        if args.useResidual:
             residualChannels = 2
         else:
             residualChannels = 0
@@ -805,84 +901,206 @@ class Refiner(nn.Module):
         #features
         #feature_init_channels = 81 + 64 + 2 + 2
         #feature_cnn_channels = 128 + 128 + 96 + 64 + 32
-        if large_motion and useDenseNet and useFlow1:
-            feature_init_channels = correlation_channels + 16 + 2 + residualChannels
-            DenseNet_channels = 160 + 128 + 96 + 64 + 32
-            m1Chan = 192
-            m2Chan = 160
-        elif large_motion and useDenseNet:
-            feature_init_channels = correlation_channels + 32 + 2 + residualChannels
-            DenseNet_channels = 160 + 128 + 96 + 64 + 32
-            m1Chan = 192
-            m2Chan = 160
-        elif useDenseNet and useFlow1:
-            feature_init_channels = correlation_channels + 16 + 2 + residualChannels
-            DenseNet_channels = 128 + 128 + 96 + 64 + 32
+        if (args.large_motion or args.full_motion) and args.useDenseNet and args.useFlow1:
+            feature_init_channels = 16**xD * (correlation_channels + 16 + 2 + residualChannels)
+            #DenseNet_channels = 8**xD * 160 + 4**xD * 128 + 2**xD * 96 + 64 + 32
+            #m0Chan = 224
+            #m1Chan = 192
+            #m2Chan = 160
+            DenseNet_channels = 8**xD * 128 + 4**xD * 128 + 2**xD * 96 + 64 + 32
+            m0Chan = 128
             m1Chan = 128
             m2Chan = 128
-        elif useDenseNet:
-            feature_init_channels = correlation_channels + 32 + 2 + residualChannels
-            DenseNet_channels = 128 + 128 + 96 + 64 + 32
+        elif (args.large_motion or args.full_motion) and args.useDenseNet:
+            feature_init_channels = 16**xD * (correlation_channels + 32 + 2 + residualChannels)
+            #DenseNet_channels = 8**xD * 160 + 4**xD * 128 + 2**xD * 96 + 64 + 32
+            #m0Chan = 224
+            #m1Chan = 192
+            #m2Chan = 160
+            DenseNet_channels = 8**xD * 128 + 4**xD * 128 + 2**xD * 96 + 64 + 32
+            m0Chan = 128
+            m1Chan = 128
+            m2Chan = 128
+        elif args.useDenseNet and args.useFlow1:
+            feature_init_channels = 16**xD * (correlation_channels + 16 + 2 + residualChannels)
+            DenseNet_channels = 8**xD * 128 + 4**xD * 128 + 2**xD * 96 + 64 + 32
+            m0Chan = 128
+            m1Chan = 128
+            m2Chan = 128
+        elif args.useDenseNet:
+            feature_init_channels = 16**xD * (correlation_channels + 32 + 2 + residualChannels)
+            DenseNet_channels = 8**xD * 128 + 4**xD * 128 + 2**xD * 96 + 64 + 32
+            m0Chan = 128
             m1Chan = 128
             m2Chan = 128
         else:
             feature_init_channels = 0
             DenseNet_channels = 32
+            m0Chan = 128
             m1Chan = 128
             m2Chan = 128
-        print('feature_init_channels:',feature_init_channels)
+        print('refiner in_channels:',feature_init_channels + DenseNet_channels + flowChannels)
 
-        if batchnorm:
+        if args.useOrginalModel:
             self.moduleMain = nn.Sequential(
                 nn.Conv2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
-                          out_channels = m1Chan,
+                          out_channels = 128,
                           kernel_size  = 3,
                           stride       = 1,
                           padding      = 1,
                           dilation     = 1,
                           bias=False),
-                nn.BatchNorm2d(m1Chan),
                 nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2, bias=False),
-                nn.BatchNorm2d(m2Chan),
+                nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=2, dilation=2, bias=False),
                 nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4, bias=False),
-                nn.BatchNorm2d(128),
+                nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4, bias=False),
                 nn.LeakyReLU(inplace=False, negative_slope=0.1),
                 nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8, bias=False),
-                nn.BatchNorm2d(96),
                 nn.LeakyReLU(inplace=False, negative_slope=0.1),
                 nn.Conv2d(in_channels=96, out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16, bias=False),
-                nn.BatchNorm2d(64),
                 nn.LeakyReLU(inplace=False, negative_slope=0.1),
                 nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1, bias=False),
-                nn.BatchNorm2d(32),
                 nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1, bias=False),
-                nn.BatchNorm2d(2)
+                nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1, bias=False)
             )
-        elif useDenseNet:
-            self.moduleMain = nn.Sequential(
-                nn.Conv2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
-                          out_channels = m1Chan,
-                          kernel_size  = 3,
-                          stride       = 1,
-                          padding      = 1,
-                          dilation     = 1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=96,  out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Conv2d(in_channels=64,  out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Upsample(scale_factor = 2, mode = 'bicubic'), # Double Resolution
-                nn.Conv2d(in_channels=32,  out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
-            )
+        elif args.useDenseNet and args.usePReLu:
+            if args.useResidual:
+                self.moduleMain = nn.Sequential(
+                    nn.Conv2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
+                              out_channels = m1Chan,
+                              kernel_size  = 3,
+                              stride       = 1,
+                              padding      = 1,
+                              dilation     = 1),
+                    nn.PReLU(num_parameters=m1Chan,init=0.1),
+                    nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
+                    nn.PReLU(num_parameters=m2Chan,init=0.1),
+                    nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
+                    nn.PReLU(num_parameters=128,init=0.1),
+                    nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
+                    nn.PReLU(num_parameters=96,init=0.1),
+                    nn.Conv2d(in_channels=96,  out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
+                    nn.PReLU(num_parameters=64,init=0.1),
+                    nn.Conv2d(in_channels=64,  out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.PReLU(num_parameters=32,init=0.1),
+                    #nn.Upsample(scale_factor = 2, mode = 'bilinear'), # Double Resolution
+                    nn.Conv2d(in_channels=32,  out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
+                )
+            elif args.FullScale:
+                self.moduleMain = nn.Sequential(
+                    nn.ConvTranspose2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
+                                       out_channels = m0Chan,
+                                       kernel_size  = 4,
+                                       stride       = 2, # Double resolution
+                                       padding      = 1),
+                    nn.PReLU(num_parameters=m0Chan,init=0.1),
+                    nn.Conv2d(in_channels=m0Chan, out_channels=m1Chan, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.PReLU(num_parameters=m1Chan,init=0.1),
+                    nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
+                    nn.PReLU(num_parameters=m2Chan,init=0.1),
+                    nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
+                    nn.PReLU(num_parameters=128,init=0.1),
+                    nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
+                    nn.PReLU(num_parameters=96,init=0.1),
+                    nn.Conv2d(in_channels=96, out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
+                    nn.PReLU(num_parameters=64,init=0.1),
+                    #nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, stride=2, padding=1), # Double resolution
+                    nn.PReLU(num_parameters=32,init=0.1),
+                    nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.PReLU(num_parameters=32,init=0.1),
+                    nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)#, nn.BatchNorm2d(2)
+                )
+            else:
+                self.moduleMain = nn.Sequential(
+                    nn.ConvTranspose2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
+                                       out_channels = m0Chan,
+                                       kernel_size  = 4,
+                                       stride       = 2, # Double resolution
+                                       padding      = 1),
+                    nn.PReLU(num_parameters=m0Chan,init=0.1),
+                    nn.Conv2d(in_channels=m0Chan, out_channels=m1Chan, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.PReLU(num_parameters=m1Chan,init=0.1),
+                    nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
+                    nn.PReLU(num_parameters=m2Chan,init=0.1),
+                    nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
+                    nn.PReLU(num_parameters=128,init=0.1),
+                    nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
+                    nn.PReLU(num_parameters=96,init=0.1),
+                    nn.Conv2d(in_channels=96,  out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
+                    nn.PReLU(num_parameters=64,init=0.1),
+                    nn.Conv2d(in_channels=64,  out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.PReLU(num_parameters=32,init=0.1),
+                    nn.Conv2d(in_channels=32,  out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
+                )
+        elif args.useDenseNet:
+            if args.useResidual:
+                self.moduleMain = nn.Sequential(
+                    nn.Conv2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
+                              out_channels = m1Chan,
+                              kernel_size  = 3,
+                              stride       = 1,
+                              padding      = 1,
+                              dilation     = 1),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=96,  out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=64,  out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    #nn.Upsample(scale_factor = 2, mode = 'bilinear'), # Double Resolution
+                    nn.Conv2d(in_channels=32,  out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
+                )
+            elif args.FullScale:
+                self.moduleMain = nn.Sequential(
+                    nn.ConvTranspose2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
+                                       out_channels = m0Chan,
+                                       kernel_size  = 4,
+                                       stride       = 2, # Double resolution
+                                       padding      = 1),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m0Chan, out_channels=m1Chan, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=96, out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    #nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, stride=2, padding=1), # Double resolution
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
+                )
+            else:
+                self.moduleMain = nn.Sequential(
+                    nn.ConvTranspose2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
+                                       out_channels = m0Chan,
+                                       kernel_size  = 4,
+                                       stride       = 2, # Double resolution
+                                       padding      = 1),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m0Chan, out_channels=m1Chan, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=96,  out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=64,  out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
+                    nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                    nn.Conv2d(in_channels=32,  out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
+                )
         else:
             self.moduleMain = nn.Sequential(
                 nn.Conv2d(in_channels  = feature_init_channels + DenseNet_channels + flowChannels,
@@ -891,31 +1109,38 @@ class Refiner(nn.Module):
                           stride       = 1,
                           padding      = 1,
                           dilation     = 1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=m1Chan,init=0.1),
                 nn.Conv2d(in_channels=m1Chan, out_channels=m2Chan, kernel_size=3, stride=1, padding=2, dilation=2),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=m2Chan,init=0.1),
                 nn.Conv2d(in_channels=m2Chan, out_channels=128, kernel_size=3, stride=1, padding=4, dilation=4),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=128,init=0.1),
                 nn.Conv2d(in_channels=128, out_channels=96, kernel_size=3, stride=1, padding=8, dilation=8),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=96,init=0.1),
                 nn.Conv2d(in_channels=96,  out_channels=64, kernel_size=3, stride=1, padding=16, dilation=16),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
+                nn.PReLU(num_parameters=64,init=0.1),
                 nn.Conv2d(in_channels=64,  out_channels=32, kernel_size=3, stride=1, padding=1, dilation=1),
-                nn.LeakyReLU(inplace=False, negative_slope=0.1),
-                nn.Upsample(scale_factor = 2, mode = 'bicubic'), # Double Resolution
+                nn.PReLU(num_parameters=32,init=0.1),
                 nn.Conv2d(in_channels=32,  out_channels=2, kernel_size=3, stride=1, padding=1, dilation=1)
             )
         # Original Caffe model used MSRA. This is also known as Kaiming
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
                 nn.init.kaiming_normal_(m.weight, 0.1)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0) 
     # end
 
     def forward(self, tensorInput):
         #print('tensorInput.shape',tensorInput.shape)
-        return self.moduleMain(tensorInput)
+        if self.FullScale and self.scale_supervision:
+            return self.moduleMain(tensorInput)*4
+        elif self.scale_supervision:
+            return self.moduleMain(tensorInput)*2
+        else:
+            return self.moduleMain(tensorInput)
     # end
 # end
 
@@ -926,39 +1151,32 @@ class Network(nn.Module):
     
     """
     def __init__(self,
-                 device           = 'cuda',
-                 use_checkpoint   = False,
-                 useFlow1         = False,
-                 useContext       = False,
-                 useResidual      = False,
-                 useDenseNet      = False,
-                 max_displacement = 4,
-                 lr_finder        = False,
-                 div_flow         = 1,
-                 batchnorm        = False,
-                 large_motion     = False,
-                 mixed_precision  = False):
+                 args):
         super(Network, self).__init__()
-        self.use_checkpoint = use_checkpoint
-        self.useFlow1 = useFlow1
-        self.useContext = useContext
-        self.useResidual = useResidual
-        self.useDenseNet = useDenseNet
-        self.device = device
-        self.lr_finder = lr_finder
-        self.div_flow = torch.as_tensor(div_flow)
+        self.use_checkpoint = args.use_checkpoint
+        self.useFlow1 = args.useFlow1
+        self.FullScale = args.FullScale
+        self.useContext = args.useContext
+        self.useResidual = args.useResidual
+        self.useDenseNet = args.useDenseNet
+        self.UpScale = args.UpScale
+        self.max_displacement = args.max_displacement[5]
+        self.scale_supervision = args.scale_supervision
+        self.device = args.device
+        self.lr_finder = args.lr_finder
+        self.div_flow = torch.as_tensor(args.div_flow)
 
-        self.moduleExtractor = Extractor(batchnorm=batchnorm, large_motion=large_motion)
+        self.moduleExtractor = Extractor(args=args)
 
-        self.moduleOne = Decoder(1, device=device, div_flow=self.div_flow, batchnorm=batchnorm, large_motion=large_motion, useResidual=useResidual, useDenseNet=useDenseNet, max_displacement=max_displacement, mixed_precision=mixed_precision)
-        self.moduleTwo = Decoder(2, device=device, div_flow=self.div_flow, batchnorm=batchnorm, large_motion=large_motion, useResidual=useResidual, useDenseNet=useDenseNet, max_displacement=max_displacement, mixed_precision=mixed_precision)
-        self.moduleThr = Decoder(3, device=device, div_flow=self.div_flow, batchnorm=batchnorm, large_motion=large_motion, useResidual=useResidual, useDenseNet=useDenseNet, max_displacement=max_displacement, mixed_precision=mixed_precision)
-        self.moduleFou = Decoder(4, device=device, div_flow=self.div_flow, batchnorm=batchnorm, large_motion=large_motion, useResidual=useResidual, useDenseNet=useDenseNet, max_displacement=max_displacement, mixed_precision=mixed_precision)
-        self.moduleFiv = Decoder(5, device=device, div_flow=self.div_flow, batchnorm=batchnorm, large_motion=large_motion, useResidual=useResidual, useDenseNet=useDenseNet, max_displacement=max_displacement, mixed_precision=mixed_precision)
-        self.moduleSix = Decoder(6, device=device, div_flow=self.div_flow, batchnorm=batchnorm, large_motion=large_motion, useResidual=useResidual, useDenseNet=useDenseNet, max_displacement=max_displacement, mixed_precision=mixed_precision)
+        self.moduleOne = Decoder(1, args=args)
+        self.moduleTwo = Decoder(2, args=args)
+        self.moduleThr = Decoder(3, args=args)
+        self.moduleFou = Decoder(4, args=args)
+        self.moduleFiv = Decoder(5, args=args)
+        self.moduleSix = Decoder(6, args=args)
 
-        if useContext:
-            self.moduleRefiner = Refiner(batchnorm=batchnorm, useFlow1=useFlow1, large_motion=large_motion, useResidual=useResidual, useDenseNet=useDenseNet, max_displacement=max_displacement)
+        if args.useContext:
+            self.moduleRefiner = Refiner(args=args)
 
         #self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey,
         #                      tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/github/pytorch-pwc/network-'
@@ -981,31 +1199,47 @@ class Network(nn.Module):
     # end_custom
 
     def forward(self, x):
-        #b, N, c, intHeight, intWidth = x.size()
         
         # Need input image resolution to always be a multiple of 64
-        #intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
-        #intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
         #
         #if intPreprocessedWidth == intWidth and intPreprocessedHeight == intHeight:
         #    # Faster but same memory utilization. Without detach it is slower but takes less memory.
 
-        tensorFirst = x[:, 0, :, :, :]
-        tensorSecond = x[:, 1, :, :, :]
 
-        #else:
-        #    tensorFirst = nn.functional.interpolate(
-        #                    input         = x[:,0,:,:,:],
-        #                    size          = (intPreprocessedHeight, intPreprocessedWidth),
-        #                    mode          = 'bicubic',
-        #                    align_corners = False,
-        #                    antialias     = True)
-        #    tensorSecond = nn.functional.interpolate(
-        #                    input         = x[:,1,:,:,:],
-        #                    size          = (intPreprocessedHeight, intPreprocessedWidth),
-        #                    mode          = 'bicubic',
-        #                    align_corners = False,
-        #                    antialias     = True)
+        if self.training & self.UpScale:
+            b, N, c, intHeight, intWidth = x.size()
+            #intPreprocessedWidth = int(math.floor(math.ceil(intWidth / 64.0) * 64.0))
+            #intPreprocessedHeight = int(math.floor(math.ceil(intHeight / 64.0) * 64.0))
+            #  11  12  13  14  15   16
+            # 704 768 832 896 960 1024
+            #if intWidth < self.max_displacement * 64 or intHeight < self.max_displacement * 64:
+            if max(intWidth, intHeight) < self.max_displacement * 64 * 2.0:
+                #scale = self.max_displacement * 64 * 2.0 / max(intWidth,intHeight)
+                scale = 2.0
+                intPreprocessedWidth = int(math.floor(math.ceil(intWidth * scale / 64.0) * 64.0))
+                intPreprocessedHeight = int(math.floor(math.ceil(intHeight * scale / 64.0) * 64.0))
+                #intPreprocessedWidth = 768 #intWidth * 2
+                #intPreprocessedHeight = 768 #intHeight * 2
+                tensorFirst = nn.functional.interpolate(
+                                input         = x[:,0,:,:,:],
+                                size          = (intPreprocessedHeight, intPreprocessedWidth),
+                                mode          = 'bilinear',
+                                align_corners = True,
+                                antialias     = True)
+                tensorSecond = nn.functional.interpolate(
+                                input         = x[:,1,:,:,:],
+                                size          = (intPreprocessedHeight, intPreprocessedWidth),
+                                mode          = 'bilinear',
+                                align_corners = True,
+                                antialias     = True)
+            else:
+                intPreprocessedWidth = intWidth
+                intPreprocessedHeight = intHeight
+                tensorFirst = x[:, 0, :, :, :]
+                tensorSecond = x[:, 1, :, :, :]
+        else:
+            tensorFirst = x[:, 0, :, :, :]
+            tensorSecond = x[:, 1, :, :, :]
 
 
         if self.training:
@@ -1027,9 +1261,9 @@ class Network(nn.Module):
         if self.training:
             output[2] = objectEstimate3['tensorFlow']
         objectEstimate2 = self.moduleTwo(tensorFirst[-5], tensorSecond[-5], objectEstimate3)
+        if self.training:
+            output[1] = objectEstimate2['tensorFlow']
         if self.useFlow1:
-            if self.training:
-                output[1] = objectEstimate2['tensorFlow']
             objectEstimate1 = self.moduleOne(tensorFirst[-6], tensorSecond[-6], objectEstimate2)
             if self.useContext:
                 objectEstimate = objectEstimate1['tensorFlow'] + self.moduleRefiner(objectEstimate1['tensorFeat'])
@@ -1049,47 +1283,77 @@ class Network(nn.Module):
         #objectEstimate = self.moduleRefiner(torch.cat([objectEstimate2['tensorFlow'], objectEstimate2['tensorFeat']], dim=1))
             
         if self.training :
-            scale_factor = [1,2,4,8,16,32,64]
-            #scale_factor = [2,4,8,16,32,64]
+            if self.useResidual:
+                scale_factor = [2,4,8,16,32,64]
+            else:
+                if self.FullScale:
+                    scale_factor = [1,1,4,8,16,32,64]
+                elif self.useFlow1:
+                    scale_factor = [1,2,4,8,16,32,64]
+                else:
+                    scale_factor = [2,2,4,8,16,32,64]
             # bilinear interpolate is nondeterministic. However the objectEstimate2 is 0.25 the size of the original image
             # Move to CPU to make it deterministic
-            if self.useFlow1:
+            #output[0] = objectEstimate
+            if self.useFlow1 or self.useContext:
                 output[0] = objectEstimate
             else:
-                output[1] = objectEstimate
+                #output[1] = objectEstimate
                 output[0] = None
             for i in range(len(output)):
                 if output[i] is not None:
-                    if scale_factor[i] != 1:
+                    #if scale_factor[i] != 1:
+                    if self.UpScale:
                         output[i] = nn.functional.interpolate(
                                             input         = output[i],
-                                            #size          = (intHeight, intWidth),
+                                            size          = (intHeight, intWidth),
+                                            #scale_factor  = scale_factor[i],
+                                            mode          = 'bilinear',
+                                            align_corners = True)
+                        if self.scale_supervision:
+                            output[i][:, 0, :, :] *= scale_factor[i] * intWidth / intPreprocessedWidth
+                            output[i][:, 1, :, :] *= scale_factor[i] * intHeight / intPreprocessedHeight
+                        else:
+                            output[i][:, 0, :, :] *= self.div_flow * intWidth / intPreprocessedWidth
+                            output[i][:, 1, :, :] *= self.div_flow * intHeight / intPreprocessedHeight
+                    else:
+                        output[i] = nn.functional.interpolate(
+                                            input         = output[i],
                                             scale_factor  = scale_factor[i],
-                                            mode          = 'bicubic',
-                                            align_corners = False)
+                                            mode          = 'bilinear',
+                                            align_corners = True)
+                        if self.scale_supervision:
+                            output[i] *= scale_factor[i]
+                        else:
+                            output[i] *= self.div_flow
                     #output[i] *= scale_factor[i]
-                    #output[i] *= self.div_flow * scale_factor[i]
-                    output[i] *= self.div_flow
-                    #output[i][:, 0, :, :] *= self.div_flow * intWidth / intPreprocessedWidth
-                    #output[i][:, 1, :, :] *= self.div_flow * intHeight / intPreprocessedHeight
             return output
         else:
             if self.useFlow1:
-                #scale_factor = 2
-                scale_factor = 1
+                if self.useResidual:
+                    scale_factor = 2
+                else:
+                    scale_factor = 1
             else:
-                #scale_factor = 4
-                scale_factor = 2
+                if self.useResidual:
+                    scale_factor = 4
+                elif self.FullScale:
+                    scale_factor = 1
+                else:
+                    scale_factor = 2
                 # bilinear interpolate is nondeterministic. However the objectEstimate2 is 0.25 the size of the original image
                 # Move to CPU to make it deterministic
-                objectEstimate = nn.functional.interpolate(
-                                    input         = objectEstimate,
-                                    #size          = (intHeight, intWidth),
-                                    scale_factor  = scale_factor,
-                                    mode          = 'bicubic',
-                                    align_corners = False)
-            #objectEstimate *= self.div_flow * scale_factor
-            objectEstimate *= self.div_flow
+                if scale_factor != 1:
+                    objectEstimate = nn.functional.interpolate(
+                                        input         = objectEstimate,
+                                        #size          = (intHeight, intWidth),
+                                        scale_factor  = scale_factor,
+                                        mode          = 'bilinear',
+                                        align_corners = True)
+            if self.scale_supervision:
+                objectEstimate *= scale_factor
+            else:
+                objectEstimate *= self.div_flow
             #objectEstimate[:, 0, :, :] *= self.div_flow * intWidth / intPreprocessedWidth
             #objectEstimate[:, 1, :, :] *= self.div_flow * intHeight / intPreprocessedHeight
             return objectEstimate
@@ -1098,35 +1362,14 @@ class Network(nn.Module):
 
 
 def flow_pwc2(data             = None,
-              device           = 'cuda',
-              use_checkpoint   = False,
-              useFlow1         = False,
-              useContext       = False,
-              useResidual      = False,
-              useDenseNet      = False,
-              max_displacement = 4,
-              lr_finder        = False,
-              div_flow         = 1,
-              batchnorm        = False,
-              large_motion     = False,
-              mixed_precision  = False):
+              args             = None):
     """FlowNetS model architecture from the
     "Learning Optical Flow with Convolutional Networks" paper (https://arxiv.org/abs/1504.06852)
     Args:
         data : pretrained weights of the network. will create a new one if not set
     """
-    moduleNetwork = Network(device           = device,
-                            use_checkpoint   = use_checkpoint,
-                            useFlow1         = useFlow1,
-                            useContext       = useContext,
-                            useResidual      = useResidual,
-                            useDenseNet      = useDenseNet,
-                            max_displacement = max_displacement,
-                            lr_finder        = lr_finder,
-                            div_flow         = div_flow,
-                            batchnorm        = batchnorm,
-                            large_motion     = large_motion,
-                            mixed_precision  = mixed_precision)
+    moduleNetwork = Network(args = args)
+    
     if data is not None:
         if 'state_dict' in data.keys():
             moduleNetwork.load_state_dict(data['state_dict'])

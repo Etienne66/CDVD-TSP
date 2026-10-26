@@ -239,7 +239,7 @@ class EPE(nn.Module):
         self.mean = mean
         self.ord = ord
 
-    def epe(self, input_flow, target_flow):
+    def epe(self, input_flow, target_flow, mask):
         """
         End-point-Error computation
         Args:
@@ -260,12 +260,23 @@ class EPE(nn.Module):
         >>> torch.linalg.norm(x, dim=1, ord=2)
         >>> x.pow(2).sum(dim=1).sqrt()
         """
+        B, _, H, W = target_flow.shape
+        infinity = max(H,W)
+
         if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
-            EPE_loss = torch.norm(target_flow - input_flow, p=self.ord, dim=1)
+            #EPE_loss = torch.norm(target_flow - input_flow, p=self.ord, dim=1)
+            #EPE_loss = torch.norm(target_flow - input_flow.nan_to_num(0,infinity,-infinity) * mask[:,None,:,:], p=self.ord, dim=1)
+            EPE_loss = torch.norm(target_flow - input_flow, p=self.ord, dim=1).float()
         else:
-            EPE_loss = torch.linalg.vector_norm(target_flow - input_flow, ord=self.ord, dim=1)
+            #EPE_loss = torch.linalg.vector_norm(target_flow - input_flow, ord=self.ord, dim=1)
+            #EPE_loss = torch.linalg.vector_norm(target_flow - input_flow.nan_to_num(0,infinity,-infinity) * mask[:,None,:,:], ord=self.ord, dim=1)
+            EPE_loss = torch.linalg.vector_norm(target_flow - input_flow, ord=self.ord, dim=1, dtype=torch.float)
         
+        #EPE_loss = EPE_loss * mask
+        #EPE_loss = EPE_loss.nan_to_num(0,infinity,-infinity) * mask
+        EPE_loss = EPE_loss.nan_to_num(100,100,-100)
         batch_size = EPE_loss.size(0)
+
         if self.mean:
             EPE_loss = EPE_loss.mean()
         else:
@@ -277,12 +288,12 @@ class EPE(nn.Module):
             #print('has mask')
             mask = target_flow[:,2,:,:]
             target_flow = target_flow[:,:2,:,:]
-            if not self.training:
-                target_flow *= mask[:,None,:,:]
-                input_flow *= mask[:,None,:,:]
-            epe_loss = self.epe(input_flow, target_flow)
+            #if not self.training:
+            #    target_flow *= mask[:,None,:,:]
+            #    input_flow *= mask[:,None,:,:]
+            epe_loss = self.epe(input_flow, target_flow, mask)
         else:
-            epe_loss = self.epe(input_flow, target_flow)
+            epe_loss = self.epe(input_flow, target_flow, mask)
 
         return epe_loss
 
@@ -308,28 +319,39 @@ class Fl_KITTI_2015(nn.Module):
         if target_flow.shape[1]==3:
             mask = target_flow[:,2,:,:]
             target_flow = target_flow[:,:2,:,:]
-        if self.use_mask:
-            if mask is None:
-                raise ValueError("Mask must be specified if part of the Target")
-            if not self.training:
-                target_flow *= mask[:,None,:,:]
-                input_flow *= mask[:,None,:,:]
+        if mask is None:
+            mask = torch.ones_like(target_flow[:,0,:,:])
+            #raise ValueError("Mask must be specified if part of the Target")
 
         #2-Norm is "the distance of the vector coordinate from the origin of the vector space. The L2 norm is calculated as the 
         #           square root of the sum of the squared vector values."
         #>>> x.norm(dim=1, p=2)
         #>>> torch.linalg.norm(x, dim=1, ord=2)
         #>>> x.pow(2).sum(dim=1).sqrt()
+
+        B, _, H, W = target_flow.shape
+        infinity = max(H,W)
+        
         if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
-            dist = torch.norm(target_flow - input_flow, p=2, dim=1)
-            gt_magnitude = torch.norm(target_flow, p=2, dim=1)
+            #dist = torch.norm(target_flow - input_flow, p=2, dim=1)
+            #dist = torch.norm(target_flow - input_flow.nan_to_num(0,infinity,-infinity) * mask[:,None,:,:], p=2, dim=1)
+            dist = torch.norm(target_flow - input_flow, p=2, dim=1).float()
+            gt_magnitude = torch.norm(target_flow, p=2, dim=1).float() # * mask
         else:
-            dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
-            gt_magnitude = torch.linalg.vector_norm(target_flow, ord=2, dim=1)
+            #dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
+            #dist = torch.linalg.vector_norm(target_flow - input_flow.nan_to_num(0,infinity,-infinity) * mask[:,None,:,:], ord=2, dim=1)
+            dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1, dtype=torch.float)
+            gt_magnitude = torch.linalg.vector_norm(target_flow, ord=2, dim=1).float() #* mask
+
+        #dist = dist * mask
+        #dist = dist.nan_to_num(0,infinity,-infinity) * mask
+        dist = dist.nan_to_num(100,100,-100)
+
         # dist is shape BxHgtxWgt
         n_err = dist.gt(self.tau[0]) & (dist/gt_magnitude).gt(self.tau[1])
         if self.use_mask:
-            fl_loss = n_err.sum()/torch.sum(mask)
+            #fl_loss = n_err.sum()/torch.sum(mask)
+            fl_loss = n_err.sum()/(B * H * W)
         else:
             fl_loss = n_err.sum()
         return fl_loss
@@ -362,7 +384,7 @@ class multiscaleLoss(nn.Module):
             target_scaled = target
         else:
             # area interpolate is deterministic
-            target_scaled = F.interpolate(target, (h, w), mode='bicubic')
+            target_scaled = F.interpolate(target.float(), (h, w), mode='bilinear')
             # Vectors need to be scaled down
             #target_scaled[:, 0, :, :] *= float(w) / float(tw)
             #target_scaled[:, 1, :, :] *= float(h) / float(th)
@@ -445,29 +467,58 @@ class WAUC(nn.Module):
         Output:
             PCK metric
         """
-        # input flow is shape (BxHgtxWgt,2)
+        # input flow is shape (Bx2xHgtxWgt)
         if target_flow.shape[1]==3:
             mask = target_flow[:,2,:,:]
             target_flow = target_flow[:,:2,:,:]
         if mask is None:
             raise ValueError("Mask must be specified if part of the Target")
-        if not self.training:
-            target_flow *= mask[:,None,:,:]
-            input_flow *= mask[:,None,:,:]
 
+        B, N, H, W = target_flow.shape
+        B2, N2, H2, W2 = input_flow.shape
+        if H != H2 or W != W2 or B != B2 or N != N2:
+            print()
+            print()
+            print()
+            print()
+            print()
+            print()
+            print()
+            print('Input height: ',H2,', width: ',W2, ', B2: ',B2, ', N2', N2)
+            print('Target height: ',H,', width: ',W, ', B: ',B, ', N', N)
+            print()
+            print()
+            print()
+            print()
+            exit()
+        infinity = max(H,W)
+        
         if LooseVersion(torch.__version__) < LooseVersion('1.9.0'):
-            dist = torch.norm(target_flow - input_flow, p=2, dim=1)
+            #dist = torch.norm(target_flow - input_flow, p=2, dim=1)
+            #dist = torch.norm(target_flow - input_flow.nan_to_num(0,infinity,-infinity) * mask[:,None,:,:], p=2, dim=1)
+            dist = torch.norm(target_flow - input_flow, p=2, dim=1).float()
         else:
-            dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
+            #dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1)
+            #dist = torch.linalg.vector_norm(target_flow - input_flow.nan_to_num(0,infinity,-infinity) * mask[:,None,:,:], ord=2, dim=1)
+            dist = torch.linalg.vector_norm(target_flow - input_flow, ord=2, dim=1, dtype=torch.float)
+
+        # Dist shape is BHW
+        #dist = dist * mask
+        #dist = dist.nan_to_num(0,infinity,-infinity) * mask
+        dist = dist.nan_to_num(100,100,-100)
+        #print('target_flow.size',target_flow.size())
+        #print('dist.size',dist.size())
+
         n_err = 0
         n_weights = 0
 
         for i in range(100):
             weight = (1 - ((i-1)/100))
-            n_err += dist.le(i/20).sum() * weight
+            n_err += dist.float().le(i/20).sum() * weight
             n_weights += weight
         
-        wauc_total = (100 * n_err) / (mask.sum() * n_weights)
+        #wauc_total = (100 * n_err) / (mask.sum() * n_weights)
+        wauc_total = (100 * n_err) / (B * H * W * n_weights)
 
         return wauc_total
 

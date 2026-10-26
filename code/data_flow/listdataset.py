@@ -9,31 +9,56 @@ from distutils.version import LooseVersion
 
 def get_gt_correspondence_mask(flow):
     ## convert flow to mapping
-    h,w = flow.shape[:2]
-    ## Just picking a number that is out of bounds instead of NAN
-    #maxhw = h+w
-    #flow = np.nan_to_num(flow, nan=-maxhw, posinf=maxhw, neginf=-maxhw)
-    #X, Y = np.meshgrid(np.linspace(0, w - 1, w),
-    #                   np.linspace(0, h - 1, h))
-    #map_x = (flow[:,:,0]+X).astype(np.float32)
-    #map_y = (flow[:,:,1]+Y).astype(np.float32)
-    #mask_x = np.logical_and(map_x>0, map_x< w)
-    #mask_y = np.logical_and(map_y>0, map_y< h)
-    #mask = np.logical_and(mask_x, mask_y).astype(np.uint8)
-    flow_u = flow[:,:,0]
-    flow_v = flow[:,:,1]
+    if torch.is_tensor(flow):
+        B, _, h, w = flow.size()
+        maskout = torch.ones(B,h,w, device=flow.device)
+        ## Just picking a number that is out of bounds instead of NAN
+        X, Y = torch.meshgrid(torch.linspace(0, w - 1, w, device=flow.device),
+                              torch.linspace(0, h - 1, h, device=flow.device),
+                              indexing='xy')
+        for i in range(B):
+            map_x = (flow[i,0,:,:]+X).float()
+            map_y = (flow[i,1,:,:]+Y).float()
+            mask_x = torch.logical_and(map_x > 0, map_x < w)
+            mask_y = torch.logical_and(map_y > 0, map_y < h)
+            mask = torch.logical_and(mask_x, mask_y).int()
+            maskout[i,:,:] = mask
 
-    invalid = np.logical_or(np.logical_or(np.isnan(flow_u), np.isnan(flow_v)),
-                            np.logical_or(np.isinf(flow_u), np.isinf(flow_v)))
-    flow_u[invalid] = 0
-    flow_v[invalid] = 0
+            #flow_u = flow[i,0,:,:]
+            #flow_v = flow[i,1,:,:]
+            #invalid = torch.logical_or(torch.logical_or(torch.isnan(flow_u), torch.isnan(flow_v)),
+            #                           torch.logical_or(torch.isinf(flow_u), torch.isinf(flow_v)))
+            #mask2 = torch.logical_not(invalid)
+            #maskout[i,:,:] *= mask2
+        return maskout
+    else:
+        if True:
+            h,w = flow.shape[:2]
+            ## Just picking a number that is out of bounds instead of NAN
+            X, Y = np.meshgrid(np.linspace(0, w - 1, w),
+                               np.linspace(0, h - 1, h),
+                               indexing='xy')
+            map_x = (flow[:,:,0]+X).astype(np.float32)
+            map_y = (flow[:,:,1]+Y).astype(np.float32)
+            mask_x = np.logical_and(map_x > 0, map_x < w)
+            mask_y = np.logical_and(map_y > 0, map_y < h)
+            mask = np.logical_and(mask_x, mask_y).astype(np.uint8)
+            flow_u = flow[:,:,0]
+            flow_v = flow[:,:,1]
+            invalid = np.logical_or(np.logical_or(np.isnan(flow_u), np.isnan(flow_v)),
+                                    np.logical_or(np.isinf(flow_u), np.isinf(flow_v)))
+            mask2 = np.logical_not(invalid)
 
-    invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u) >= w, np.abs(flow_v) >= h))
-    flow_u[invalid] = 0
-    flow_v[invalid] = 0
-    
-    mask = np.logical_not(invalid)
-    return mask
+            return mask * mask2
+        else:
+            flow_u = flow[:,:,0]
+            flow_v = flow[:,:,1]
+            invalid = np.logical_or(np.logical_or(np.isnan(flow_u), np.isnan(flow_v)),
+                                    np.logical_or(np.isinf(flow_u), np.isinf(flow_v)))
+            mask2 = np.logical_not(invalid)
+            
+            return mask2
+
 
 
 def default_loader(root, path_imgs, path_flo):
@@ -90,6 +115,8 @@ class ListDataset(data.Dataset):
         if self.transform is not None:
             inputs[0] = self.transform(inputs[0])
             inputs[1] = self.transform(inputs[1])
+            if len(inputs) == 3:
+                inputs[2] = self.transform(inputs[2])
         #mask = mask.astype(np.bool) if LooseVersion(torch.__version__) >= LooseVersion('1.3') else mask.astype(np.uint8)
         target = np.concatenate((target, mask[:,:,None]), axis=2)
         if self.target_transform is not None:

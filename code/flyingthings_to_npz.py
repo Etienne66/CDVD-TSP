@@ -24,7 +24,7 @@ from pathlib import Path
 if __name__ == '__main__':
     try:
         dataset = Path('F:/workspaces/FlyingThings3D_subset_flow/FlyingThings3D_subset') 
-        root_dir = Path('F:/workspaces/CDVD-TSP/datasets/FlyingThings3D_subset')
+        root_dir = Path('E:/workspaces/CDVD-TSP/datasets/FlyingThings3D_subset')
         
         for train_path in dataset.iterdir():
             flow_path = train_path / 'flow'

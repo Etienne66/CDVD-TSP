@@ -1,3 +1,4 @@
+from __future__ import division
 #import signal
 import platform
 import os
@@ -9,6 +10,7 @@ import time
 import datetime
 import math
 import matplotlib.pyplot as plt
+from statistics import mean 
 #from distutils.version import LooseVersion
 from packaging import version
 
@@ -20,7 +22,7 @@ import torch.optim
 import torch.utils.data
 from torch.cuda.amp import GradScaler
 from torch.utils.tensorboard import SummaryWriter
-import future
+#import future
 import torchvision
 import torchvision.transforms as transforms
 import random
@@ -57,8 +59,9 @@ parser.add_argument('--save_path', type=Path, default='../runs',
 parser.add_argument('--dataset', metavar='DATASET', default='autoflow', #flying_things_both flying_chairs2 flying_things_final flying_things_clean
                     choices=dataset_names,# nargs='*',
                     help='dataset type: ' + ' | '.join(dataset_names))
-parser.add_argument('--datasets', metavar='DATASET', default=['autoflow','chairs2','things_final','viper3'], #flying_things_both flying_chairs2 flying_things_final flying_things_clean
-                    choices=['autoflow','chairs2','things','things_clean','things_final','viper','viper3','viper1'], nargs='+',
+parser.add_argument('--datasets', metavar='DATASET', default=['autoflow','chairs2','things_final','viper1'], #flying_things_both flying_chairs2 flying_things_final flying_things_clean
+                    choices=['autoflow','autoflow.up','chairs2','chairs2.up','things','things_clean','things_clean.1',
+                             'things_clean.up','things_final','things_final.up','viper','viper3','viper1'], nargs='+',
                     help='dataset type: ' + ' | '.join(['autoflow','chairs2','things','things_clean','viper']))
 parser.add_argument('--testdataset', metavar='DATASET', default='mpi_sintel_final', #mpi_sintel_final mpi_sintel_clean KITTI_2015_occ
                     choices=dataset_names,
@@ -70,7 +73,7 @@ parser.add_argument('--n_GPUs', type=int, default=1, metavar='N',
                     help='number of GPUs')
 parser.add_argument('-j', '--num_workers', default=4, type=int, metavar='N',
                     help='number of data loading workers. Set to number of cpus')
-parser.add_argument('-b', '--batch_size', dest='batch_size', default=32, type=int, #22
+parser.add_argument('-b', '--batch_size', dest='batch_size', default=None, type=int, #22
                     choices=[1,2,4,8,16,32,64,128],
                     metavar='N', help='mini-batch size')
 parser.add_argument('--test_batch_size', default=4, type=int, #6
@@ -105,36 +108,54 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
 parser.add_argument('--no_date', action='store_true',
                     help='don\'t append date timestamp to folder' )
 parser.add_argument('--div_flow', type=int, default=1, metavar='N',
-                    choices=[1,16,20,32,256,512,1024,2048,4096],
+                    choices=[1,2,4,8,16,20,32],
                     help='value by which flow will be divided. Original value is 20 but 1 with batchNorm gives good results')
 parser.add_argument('--batchnorm', action='store_true',
                     help='use torch.nn.BatchNorm2d after torch.nn.Conv2d')
+parser.add_argument('--batchnorm2', action='store_true',
+                    help='use torch.nn.BatchNorm2d after Activation layer')
 parser.add_argument('--normalize', action='store_true',
                     help='use Normalize images')
 parser.add_argument('--large_motion', action='store_true',
                     help='Change to increase channels for flow 4,5,6 to better detect large motions')
+parser.add_argument('--full_motion', action='store_true',
+                    help='Change to increase channels for flow 3,4,5,6 to better detect large motions')
+parser.add_argument('--useOrginalModel', action='store_true', help='use Original Model with LeakyReLu for optical flow estimator')
 parser.add_argument('--useFlow1', action='store_true', help='use flow 1 as the final stage instead of flow 2')
+parser.add_argument('--FullScale', action='store_true', help='Scale Flow2 to full scale with ConvTranspose2d')
+parser.add_argument('--UpScale', action='store_true', help='Scale small input images by 2')
 parser.add_argument('--useResidual', action='store_true', help='use residual features in optical flow estimator')
 parser.add_argument('--useDenseNet', action='store_true', help='use DenseNet in optical flow estimator')
+parser.add_argument('--usePReLu', action='store_true', help='use PReLu instead of LeakyReLU in optical flow estimator Extractor')
+parser.add_argument('--usePReLuD', action='store_true', help='use PReLu instead of LeakyReLU in optical flow estimator Decoder')
+parser.add_argument('--Reset_Layer6', action='store_true', help='use PReLu instead of LeakyReLU in optical flow estimator')
+parser.add_argument('--DenseNetSize', type=int, default=0, choices=[0,1], help='Size of DenseNet. 0 = Original; 1 = FullDenseNet')
 parser.add_argument('--useContext', action='store_true', help='use context network to refine flow 2')
-parser.add_argument('--max_displacement', type=int, default=4, metavar='N',
+parser.add_argument('--scale_supervision', action='store_true', help='scale supervision signal at each level instead of using div_flow')
+parser.add_argument('--scale_output', action='store_true', help='scale outputs for evaluation during training.')
+parser.add_argument('--EC', type=int, default=[16,32,64,128,512,2048], metavar='N', nargs=6, #16,32,64,96,128,192  16,32,64,128,256,512   16,32,64,128,512,2048
+                    help='Extract Channels list')
+parser.add_argument('--max_displacement', type=int, default=[4,4,4,4,4,4], metavar='N', nargs=6,
                     help='search range for correlation function')
 parser.add_argument('--Crop_Size', type=int, default=None, metavar='N', nargs=2,
                     help='Size of random Crop. H W')
 parser.add_argument('--loss', default='0*mWAUCl+1*mEPE', type=str,
                     choices=['0*mWAUCl+1*mEPE1','0*mWAUCl+1*mEPE',
+                             '8.4*mWAUCl+1.6*mEPE1','1.6*mWAUCl+8.4*mEPE','1.6*mWAUCl+8.4*mEPE1',
                              '1*mWAUCl+2*mEPE1','1*mWAUCl+2*mEPE',
+                             '1*mWAUCl+4*mEPE1','1*mWAUCl+4*mEPE',
                              '1*mWAUCl+1*mEPE1','1*mWAUCl+1*mEPE'],
                     help='Loss function. EPE = Average endpoint error; Fl = Percentage of optical flow outliers from 0 to 100 percent')
-parser.add_argument('--weights', type=float, nargs='+', default=None) #[1, 0.5, 0.25, 0.25, 0.25, 0.25]
+parser.add_argument('--weights', type=float, nargs='+', default=None) #[1, 0.5, 0.25, 0.25, 0.25, 0.25] [0, 1, 0.75, 0.5, 0.375, 0.25]
 
 parser.add_argument('--rgb_range', type=int, default=1,
                     help='maximum value of RGB')
-parser.add_argument('--seed', type=int, default=1,
+parser.add_argument('--seed', type=int, default=1966,
                     help='random seed')
 parser.add_argument('--split_losses', action='store_true',
                     help='split flow losses and graph them')
-parser.add_argument('--clip', type=float, default=0.5, help='gradient clipping')
+parser.add_argument('--clip', type=float, default=None, help='gradient clipping')
+parser.add_argument('--clamp', type=float, default=None, help='clamp vectors to a maximum')
 parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
 parser.add_argument('--use_checkpoint', action='store_true', help='use checkpoint')
 
@@ -152,15 +173,13 @@ OptimizerGroup = parser.add_argument_group('Optimizer', description='Optimizer o
 OptimizerGroup.add_argument('--solver', default='adamw', type=str,
                     choices=['adam','adamw','sgd'],
                     help='solver algorithms')
-OptimizerGroup.add_argument('--lr', '--learning-rate', default=1.0e-7, type=float, metavar='LR',
+OptimizerGroup.add_argument('--lr', '--learning-rate', default=None, type=float, metavar='LR', #1.0e-7
                     help='initial learning rate')
 OptimizerGroup.add_argument('--max_lr', default=2.5e-4, type=float, metavar='M',
                     help='Sets maximum Learning Rate for LRFinder, OneCycleLR, and CyclicLr')
 OptimizerGroup.add_argument('--lr_decay', type=int, default=200, metavar='N',
                     help='learning rate decay per N epochs')
 OptimizerGroup.add_argument('--weight_decay', type=float, default=0.,
-                    help='weight decay')
-OptimizerGroup.add_argument('--AdamW_weight_decay', type=float, default=1e-8,
                     help='weight decay')
 OptimizerGroup.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum for sgd')
@@ -218,8 +237,53 @@ terminate = False
 #    global terminate                         
 #    terminate = True
 
+def reset_all_weights(self, model: torch.nn.Module) -> None:
+    """
+    refs:
+        - https://discuss.pytorch.org/t/how-to-re-set-alll-parameters-in-a-network/20819/6
+        - https://stackoverflow.com/questions/63627997/reset-parameters-of-a-neural-network-in-pytorch
+        - https://pytorch.org/docs/stable/generated/torch.nn.Module.html
+    """
+
+    @torch.no_grad()
+    def weight_reset(m: torch.nn.Module):
+        # - check if the current module has reset_parameters & if it's callable, call it on m
+        reset_parameters = getattr(m, "reset_parameters", None)
+        if callable(reset_parameters):
+            m.reset_parameters()
+
+    # Applies fn recursively to every submodule see: https://pytorch.org/docs/stable/generated/torch.nn.Module.html
+    model.apply(fn=weight_reset)
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def min_max_parameters(model):
+    model_min = 0
+    model_max = 0
+    model_mean = AverageMeter()
+    for p in model.parameters():
+        if p.requires_grad:
+            model_min = min(model_min, p.min().item())
+            model_max = max(model_max, p.max().item())
+            model_mean.update = (p.norm().item())
+    return model_min, model_max, model_mean.avg
+
+def min_max_gradients(model):
+    model_max = 0.0
+    model_mean = AverageMeter()
+    for p in model.parameters():
+        if p.requires_grad and p.grad is not None:
+            model_max = max(model_max, p.grad.abs().max().item())
+            model_mean.update = (p.grad.abs().mean().item())
+    return model_max, model_mean.avg
+
+def norm_gradients(model):
+    model_mean = AverageMeter()
+    for p in model.parameters():
+        if p.requires_grad and p.grad is not None:
+            model_mean.update = (p.grad.norm())
+    return model_mean.avg, mdoel_mean.count
 
 def main():
     global args, terminate, tqdm_main, tqdm_train0, tqdm_train1, tqdm_train2, tqdm_test0, tqdm_test1, tqdm_test2
@@ -238,7 +302,6 @@ def main():
     args.n_channel=2
     #args.normalize = True
     #args.mini_batch_size = int(args.batch_size / args.accumulation_steps)
-    args.step_size = int(args.batch_size / 8) # Size of the original author's batch size
 
     if args.max_num_steps == 0:
         args.max_num_steps = args.num_steps
@@ -258,11 +321,21 @@ def main():
             old_args = network_data['args']
             args.arch = old_args.arch
             args.large_motion = old_args.large_motion
+            args.FullScale = old_args.FullScale
+            args.clip = old_args.clip
+            args.clamp = old_args.clamp
+            args.div_flow = old_args.div_flow
+            args.useDenseNet = old_args.useDenseNet
+            args.useContext = old_args.useContext
+            args.max_displacement = old_args.max_displacement
             args.normalize = old_args.normalize
             args.batchnorm = old_args.batchnorm
+            args.batchnorm2 = old_args.batchnorm2
             args.useFlow1 = old_args.useFlow1
+            args.usePReLu = old_args.usePReLu
+            args.usePReLuD = old_args.usePReLuD
             args.max_displacement = old_args.max_displacement
-            
+            args.EC = old_args.EC
             ##Don't use state_dict for scheduler and optimizer because this is not a resume
             #if 'optimizer_state_dict' in network_data.keys(): network_data.pop('optimizer_state_dict')
             #if 'scheduler_state_dict' in network_data.keys(): network_data.pop('scheduler_state_dict')
@@ -272,6 +345,8 @@ def main():
             #args.save_path = save_path
             #args.start_epoch = 0
             #args.n_iter = 0
+        if args.batch_size is None:
+            args.batch_size = 8
         if args.evaluate:
             args.run_path = Path(args.arch + '-' + datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S") + '-PreTrained-Eval')
         else:
@@ -280,8 +355,11 @@ def main():
     elif args.resume is not None:
         # Save resume and epochs to restore after loading
         resume = args.resume
+        clip = args.clip
+        clamp = args.clamp
         epochs = args.epochs
         max_num_steps = args.max_num_steps
+        batch_size = args.batch_size
         pct_start = args.pct_start
         num_workers = args.num_workers
         network_data = torch.load(args.save_path / args.resume, map_location=torch.device(args.device))
@@ -291,8 +369,16 @@ def main():
         args.epochs = epochs
         args.num_workers = num_workers
         args.max_num_steps = max_num_steps
+        args.clip = args.clip if clip is None else clip
+        args.clamp = args.clamp if clamp is None else clamp
+        if batch_size is not None:
+            args.batch_size = batch_size
         if args.pct_start is None:
             args.pct_start = pct_start
+        if not hasattr(args, 'EC'):
+            args.EC = [16,32,64,128,512,2048]
+            args.batchnorm = True
+        
 
         # Reset device in case the model was saved with a different device
         args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -319,11 +405,14 @@ def main():
         random.setstate(network_data['random_state'])
         np.random.set_state(network_data['numpy_random_state'])
         print("=> using trained model '{}\{}' with divisions '{}'".format(args.arch,args.resume,args.div_flow))
+        print("Clip at ", args.clip)
     else:
         network_data = {}
         print("=> creating model '{}' with divisions '{}'".format(args.arch,args.div_flow))
         args.run_path = Path(args.arch + '-' + datetime.datetime.now().strftime("%Y-%m-%dT%H%M%S"))
+        args.clip = 1.0 if args.clip is None else args.clip
 
+    args.step_size = int(args.batch_size / 8) # Size of the original author's batch size
     args.loss_Flow_net = loss.Loss(args)
 
     print('=> will save everything to {}'.format(args.save_path / args.run_path))
@@ -423,14 +512,30 @@ def main():
         }
     else:
         image_sizes = {
-            "autoflow"      : [ 448, 576], #258k
-            "chairs2"       : [ 384, 512], #197k
-            "things"        : [ 512, 960], #492k
-            "things_clean"  : [ 512, 960], #492k
-            "things_final"  : [ 512, 960], #492k
-            "viper"         : [1024,1920], #1966k
-            "viper1"        : [1024,1920], #1966k
-            "viper3"        : [1024,1920]  #1966k
+            "autoflow"          : [ 448, 576], #258k x2 896x1152 1032k
+            "autoflow.up"       : [ 448, 576], #258k x2 896x1152 1032k
+            "chairs2"           : [ 384, 512], #197k x2 768x1024 786k
+            "chairs2.up"        : [ 384, 512], #197k x2 768x1024 786k
+            "things"            : [ 512, 960], #492k
+            "things.1"          : [ 512, 512], #229k
+            "things_clean"      : [ 540, 960], #492k
+            "things_clean.up"   : [ 540, 960], #492k
+            "things_clean.1"    : [ 512, 960], #294k
+            "things_clean.2"    : [ 512, 512], #229k
+            "things_final"      : [ 540, 960], #492k
+            "things_final.up"   : [ 540, 960], #492k
+            "things_final.1"    : [ 384, 768], #294k
+            "things_final.2"    : [ 512, 512], #229k
+            "viper"             : [1024,1920], #1966k
+            #"viper1"            : [1024,1920], #1966k
+            "viper1"            : [1080,1920], #1966k
+            "viper1.1"          : [ 704,1280], #901k
+            "viper1.2"          : [ 576, 576], #332k
+            "viper1.3"          : [ 384, 768], #294k
+            "viper1.4"          : [ 512, 512], #262k
+            #"viper1.2"          : [ 448, 512], #229k
+            "viper1"            : [1024,1920], #1966k
+            "viper3"            : [1024,1920]  #1966k
         }
 
     if args.useFlow1 and args.useDenseNet and (args.useResidual or args.useContext):
@@ -466,6 +571,142 @@ def main():
             "viper1"        : min(2,args.batch_size),
             "viper3"        : min(2,args.batch_size)
         }
+    elif args.max_displacement[0] == 8 \
+     and args.DenseNetSize == 1 \
+     and args.image_size is not None \
+     and args.image_size[0] <= 704 \
+     and args.image_size[1] <= 1280:
+        mini_batch_sizes = {
+            "autoflow"      : min(8,args.batch_size),
+            "chairs2"       : min(8,args.batch_size),
+            "things"        : min(4,args.batch_size),
+            "things_clean"  : min(4,args.batch_size),
+            "things_final"  : min(4,args.batch_size),
+            "viper"         : min(4,args.batch_size),
+            "viper1"        : min(4,args.batch_size),
+            "viper3"        : min(4,args.batch_size)
+        }
+    elif args.max_displacement[0] == 8 and args.DenseNetSize == 1:
+        mini_batch_sizes = {
+            "autoflow"      : min(8,args.batch_size),
+            "chairs2"       : min(16,args.batch_size),
+            "things"        : min(4,args.batch_size),
+            "things_clean"  : min(4,args.batch_size),
+            "things_final"  : min(4,args.batch_size),
+            "viper"         : min(2,args.batch_size),
+            "viper1"        : min(2,args.batch_size),
+            "viper3"        : min(2,args.batch_size)
+        }
+    elif args.max_displacement[0] == 8 \
+     and args.DenseNetSize == 0 \
+     and args.image_size is not None \
+     and args.image_size[0] <= 704 \
+     and args.image_size[1] <= 1280:
+        mini_batch_sizes = {
+            "autoflow"      : min(16,args.batch_size),
+            "chairs2"       : min(32,args.batch_size),
+            "things"        : min(8,args.batch_size),
+            "things_clean"  : min(8,args.batch_size),
+            "things_final"  : min(8,args.batch_size),
+            "viper"         : min(2,args.batch_size),
+            "viper1"        : min(2,args.batch_size),
+            "viper1.1"      : min(2,args.batch_size),
+            "viper1.2"      : min(16,args.batch_size),
+            "viper3"        : min(2,args.batch_size)
+        }
+    elif args.max_displacement[0] == 8 and args.UpScale and args.useContext:
+        mini_batch_sizes = {
+            "autoflow"      : min(4,args.batch_size),
+            "chairs2"       : min(8,args.batch_size),
+            "things"        : min(2,args.batch_size),
+            "things.1"      : min(16,args.batch_size),
+            "things_clean"  : min(2,args.batch_size),
+            "things_clean.1": min(8,args.batch_size),
+            "things_clean.2": min(16,args.batch_size),
+            "things_final"  : min(8,args.batch_size),
+            "things_final.1": min(8,args.batch_size),
+            "things_final.2": min(16,args.batch_size),
+            "viper"         : min(4,args.batch_size),
+            "viper1"        : min(2,args.batch_size),
+            "viper1.1"      : min(8,args.batch_size),
+            "viper1.2"      : min(8,args.batch_size),
+            "viper1.3"      : min(16,args.batch_size),
+            "viper1.4"      : min(16,args.batch_size),
+            "viper3"        : min(2,args.batch_size)
+        }
+    elif args.max_displacement[0] == 8 and args.UpScale:
+        mini_batch_sizes = {
+            "autoflow"          : min(4,args.batch_size),
+            "autoflow.up"       : min(4,args.batch_size),
+            "chairs2"           : min(4 if args.EC[5] >= 256 else 8,args.batch_size),
+            "chairs2.up"        : min(4 if args.EC[5] >= 256 else 8,args.batch_size),
+            "things"            : min(4,args.batch_size),
+            "things.1"          : min(16,args.batch_size),
+            "things_clean"      : min(4,args.batch_size),
+            "things_clean.up"   : min(4,args.batch_size),
+            "things_clean.1"    : min(8,args.batch_size),
+            "things_clean.2"    : min(16,args.batch_size),
+            "things_final"      : min(8,args.batch_size),
+            "things_final.up"   : min(4,args.batch_size),
+            "things_final.1"    : min(8,args.batch_size),
+            "things_final.2"    : min(16,args.batch_size),
+            "viper"             : min(4,args.batch_size),
+            "viper1"            : min(2,args.batch_size),
+            "viper1.1"          : min(8,args.batch_size),
+            "viper1.2"          : min(8,args.batch_size),
+            "viper1.3"          : min(16,args.batch_size),
+            "viper1.4"          : min(16,args.batch_size),
+            "viper3"            : min(2,args.batch_size)
+        }
+    elif args.max_displacement[0] == 8:
+        mini_batch_sizes = {
+            "autoflow"          : min(16,args.batch_size),
+            "autoflow.up"       : min(4 if args.EC[5] > 512 else 8,args.batch_size),
+            "chairs2"           : min(16,args.batch_size),
+            "chairs2.up"        : min(4 if args.EC[5] > 512 else 8,args.batch_size),
+            "things"            : min(8,args.batch_size),
+            "things.1"          : min(16,args.batch_size),
+            "things_clean"      : min(8,args.batch_size),
+            "things_clean.up"   : min(4,args.batch_size),
+            "things_clean.1"    : min(8,args.batch_size),
+            "things_clean.2"    : min(16,args.batch_size),
+            "things_final"      : min(8,args.batch_size),
+            "things_final.up"   : min(4,args.batch_size),
+            "things_final.1"    : min(8,args.batch_size),
+            "things_final.2"    : min(16,args.batch_size),
+            "viper"             : min(4,args.batch_size),
+            "viper1"            : min(4,args.batch_size),
+            "viper1.1"          : min(8,args.batch_size),
+            "viper1.2"          : min(8,args.batch_size),
+            "viper1.3"          : min(16,args.batch_size),
+            "viper1.4"          : min(16,args.batch_size),
+            "viper3"            : min(2,args.batch_size)
+        }
+    elif 4 < args.max_displacement[0] <= 8:
+        mini_batch_sizes = {
+            "autoflow"          : min(16,args.batch_size),
+            "autoflow.up"       : min(4,args.batch_size),
+            "chairs2"           : min(32,args.batch_size),
+            "chairs2.up"        : min(4 if args.EC[5] >= 256 else 8,args.batch_size),
+            "things"            : min(8,args.batch_size),
+            "things.1"          : min(16,args.batch_size),
+            "things.1"          : min(16,args.batch_size),
+            "things_clean"      : min(8,args.batch_size),
+            "things_clean.up"   : min(4,args.batch_size),
+            "things_clean.1"    : min(8,args.batch_size),
+            "things_clean.2"    : min(16,args.batch_size),
+            "things_final"      : min(8,args.batch_size),
+            "things_final.up"   : min(4,args.batch_size),
+            "things_final.1"    : min(8,args.batch_size),
+            "things_final.2"    : min(16,args.batch_size),
+            "viper"             : min(2,args.batch_size),
+            "viper1"            : min(2,args.batch_size),
+            "viper1.1"          : min(4,args.batch_size),
+            "viper1.2"          : min(8,args.batch_size),
+            "viper1.3"          : min(16,args.batch_size),
+            "viper1.4"          : min(16,args.batch_size),
+            "viper3"            : min(2,args.batch_size)
+        }
     elif args.image_size is not None and args.image_size[0] <= 704 and args.image_size[1] <= 1280 :
         mini_batch_sizes = {
             "autoflow"      : min(32,args.batch_size),
@@ -475,34 +716,76 @@ def main():
             "things_final"  : min(16,args.batch_size),
             "viper"         : min(8,args.batch_size),
             "viper1"        : min(8,args.batch_size),
+            "viper1.1"      : min(8,args.batch_size),
+            "viper1.2"      : min(32,args.batch_size),
             "viper3"        : min(8,args.batch_size)
         }
     else:
         mini_batch_sizes = {
-            "autoflow"      : min(16,args.batch_size),
-            "chairs2"       : min(32,args.batch_size),
-            "things"        : min(16,args.batch_size),
-            "things_clean"  : min(16,args.batch_size),
-            "things_final"  : min(16,args.batch_size),
-            "viper"         : min(4,args.batch_size),
-            "viper1"        : min(4,args.batch_size),
-            "viper3"        : min(4,args.batch_size)
+            "autoflow"          : min(32 if args.EC[5] <= 256 else 16,args.batch_size),
+            "autoflow.up"       : min(4 if args.EC[5] >= 512 else 8,args.batch_size),
+            "chairs2"           : min(32,args.batch_size),
+            "chairs2.up"        : min(8 if args.EC[5] >= 512 else 16,args.batch_size),
+            "things"            : min(16,args.batch_size),
+            "things_clean"      : min(16,args.batch_size),
+            "things_clean.up"   : min(4,args.batch_size),
+            "things_final"      : min(16,args.batch_size),
+            "viper"             : min(4,args.batch_size),
+            "viper1"            : min(4,args.batch_size),
+            "viper1.1"          : min(8,args.batch_size),
+            "viper1.2"          : min(32,args.batch_size),
+            "viper3"            : min(4,args.batch_size)
         }
-    print('mini_batch_sizes["autoflow"]', mini_batch_sizes["autoflow"])
+    scales = {
+        "autoflow"          : 1,
+        "autoflow.up"       : 2,
+        "chairs2"           : 1,
+        "chairs2.up"        : 2,
+        "things"            : 1,
+        "things_clean"      : 1,
+        "things_clean.up"   : 2,
+        "things_clean.1"    : 1,
+        "things_final"      : 1,
+        "things_final.up"   : 2,
+        "viper"             : 1,
+        "viper1"            : 1,
+        "viper1.1"          : 1,
+        "viper1.2"          : 1,
+        "viper3"            : 1
+    }
+    #print('mini_batch_sizes["autoflow"]', mini_batch_sizes["autoflow"])
+    #print('mini_batch_sizes["chairs2"]', mini_batch_sizes["chairs2"])
+    #print('mini_batch_sizes["things_clean"]', mini_batch_sizes["things_clean"])
+    #print('mini_batch_sizes["viper1"]', mini_batch_sizes["viper1"])
     train_loaders = {}
     epoch_sizes = {}
     train_loader_len = 0
-    for i in range(len(args.datasets)):
-        train_loaders[args.datasets[i]] = datasets.fetch_dataloader(args,
-                                                                    image_size      = image_sizes[args.datasets[i]],
-                                                                    mini_batch_size = mini_batch_sizes[args.datasets[i]],
-                                                                    stage           = args.datasets[i])
-        dataset_len = len(train_loaders[args.datasets[i]].dataset)
-        if dataset_len > args.max_dataset_len:
-            dataset_len = args.max_dataset_len
-        train_loader_len += dataset_len
-        epoch_sizes[args.datasets[i]] = math.floor(math.floor(dataset_len/args.batch_size) \
-                                        * args.batch_size/mini_batch_sizes[args.datasets[i]])
+    datasetlist = ["autoflow","autoflow.up","chairs2","chairs2.up","things","things_clean","things_clean.1","things_clean.up","things_final","things_final.up","viper","viper1","viper3"]
+    for i in range(len(datasetlist)):
+        if datasetlist[i] in args.datasets:
+            train_loaders[datasetlist[i]] = datasets.fetch_dataloader(args,
+                                                               image_size      = image_sizes[datasetlist[i]],
+                                                               mini_batch_size = mini_batch_sizes[datasetlist[i]],
+                                                               stage           = datasetlist[i])
+            dataset_len = len(train_loaders[datasetlist[i]].dataset)
+            if dataset_len > args.max_dataset_len:
+                dataset_len = args.max_dataset_len
+            train_loader_len += dataset_len
+            epoch_sizes[datasetlist[i]] = math.floor(math.floor(dataset_len/args.batch_size) \
+                                   * args.batch_size/mini_batch_sizes[datasetlist[i]])
+            print('mini_batch_sizes[',datasetlist[i],']:', mini_batch_sizes[datasetlist[i]])
+
+    #for i in range(len(args.datasets)):
+    #    train_loaders[args.datasets[i]] = datasets.fetch_dataloader(args,
+    #                                                                image_size      = image_sizes[args.datasets[i]],
+    #                                                                mini_batch_size = mini_batch_sizes[args.datasets[i]],
+    #                                                                stage           = args.datasets[i])
+    #    dataset_len = len(train_loaders[args.datasets[i]].dataset)
+    #    if dataset_len > args.max_dataset_len:
+    #        dataset_len = args.max_dataset_len
+    #    train_loader_len += dataset_len
+    #    epoch_sizes[args.datasets[i]] = math.floor(math.floor(dataset_len/args.batch_size) \
+    #                                    * args.batch_size/mini_batch_sizes[args.datasets[i]])
 
     print("=> fetching test image pairs in '{}\{}'".format(args.data,args.testdataset))
     test_set = data_flow.__dict__[args.testdataset](
@@ -528,25 +811,105 @@ def main():
                                                                            train_loader_len,
                                                                            len(val_loader.dataset)))
     # create model
+    #model = models.__dict__[args.arch](network_data,
+    #                                   device           = args.device,
+    #                                   use_checkpoint   = args.use_checkpoint,
+    #                                   useFlow1         = args.useFlow1,
+    #                                   useContext       = args.useContext,
+    #                                   useResidual      = args.useResidual,
+    #                                   useDenseNet      = args.useDenseNet,
+    #                                   max_displacement = args.max_displacement,
+    #                                   lr_finder        = args.lr_finder,
+    #                                   div_flow         = args.div_flow,
+    #                                   batchnorm        = args.batchnorm,
+    #                                   large_motion     = args.large_motion,
+    #                                   mixed_precision  = args.mixed_precision).to(args.device)
     model = models.__dict__[args.arch](network_data,
-                                       device           = args.device,
-                                       use_checkpoint   = args.use_checkpoint,
-                                       useFlow1         = args.useFlow1,
-                                       useContext       = args.useContext,
-                                       useResidual      = args.useResidual,
-                                       useDenseNet      = args.useDenseNet,
-                                       max_displacement = args.max_displacement,
-                                       lr_finder        = args.lr_finder,
-                                       div_flow         = args.div_flow,
-                                       batchnorm        = args.batchnorm,
-                                       large_motion     = args.large_motion,
-                                       mixed_precision  = args.mixed_precision).to(args.device)
+                                       args).to(args.device)
 
     if args.device.type == "cuda" and args.n_GPUs > 1:
         model = torch.nn.DataParallel(model).cuda()
     cudnn.enabled = True
     cudnn.benchmark = True
+    
+    print('Model parameters: {:,}'.format(count_parameters(model)))
+    #for name, param in model.named_parameters():
+    #    print('name:',name)
+        #print('name:',name,' data:', param.data)
+        #if param.requires_grad and param.grad is not None:
+        #    print('name:',name,' data:', param.data.norm().detach().cpu().numpy())
+            #print('name:',name,' data:', param.data)
+            #print('name:',name)
+    #for name, module in model.named_modules():
+    #    #print(idx, '->', m)
+    #    if isinstance(module, torch.nn.PReLU):
+    #        print('name:',name,' module:',module)
+    #        for pname, param in module.named_parameters():
+    #            if param.requires_grad:
+    #                print('pname:',pname,' norm:',param.data.norm().detach().cpu().numpy())
+    #exit()
+    #if args.usePReLu and args.weight_decay > 0:
+    #    for name, module in model.named_modules():
+    #        if isinstance(module, torch.nn.PReLU):
+    #            for pname, param in module.named_parameters():
+    #                if param.requires_grad:
+    #                    param.requires_grad = False
+                    #print('name:',name)
+                    #print('pname:',pname)
+                    #print('module:',module)
+                    #print('param:',param)
+    #for param in model.moduleExtractor.moduleOne.parameters():
+    #    param.requires_grad = True    
+    #for param in model.moduleExtractor.moduleTwo.parameters():
+    #    param.requires_grad = True    
+    #for param in model.moduleExtractor.moduleThr.parameters():
+    #    param.requires_grad = False    
+    #for param in model.moduleExtractor.moduleFou.parameters():
+    #    param.requires_grad = False    
+    #for param in model.moduleExtractor.moduleFiv.parameters():
+    #    param.requires_grad = False    
+    #for param in model.moduleExtractor.moduleSix.parameters():
+    #    param.requires_grad = False
+    #
+    #for param in model.moduleOne.parameters():
+    #    param.requires_grad = True    
+    #for param in model.moduleTwo.parameters():
+    #    param.requires_grad = True    
+    #for param in model.moduleThr.parameters():
+    #    param.requires_grad = False    
+    #for param in model.moduleFou.parameters():
+    #    param.requires_grad = False    
+    #for param in model.moduleFiv.parameters():
+    #    param.requires_grad = False    
+    #for param in model.moduleSix.parameters():
+    #    param.requires_grad = False    
+    #
+    #for param in model.moduleRefiner.parameters():
+    #    param.requires_grad = True
 
+    if args.Reset_Layer6:
+        for layer in model.moduleExtractor.moduleSix.children():
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+            for name, module in layer.named_modules():
+                if isinstance(module, torch.nn.PReLU):
+                    module.init = 5
+                if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.ConvTranspose2d):
+                    torch.nn.init.kaiming_normal_(module.weight, 0.1)
+                    if module.bias is not None:
+                        torch.nn.init.constant_(module.bias, 0)
+        for layer in model.moduleSix.children():
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
+            for name, module in layer.named_modules():
+                if isinstance(module, torch.nn.PReLU):
+                    module.init = 1
+                if isinstance(module, torch.nn.Conv2d) or isinstance(module, torch.nn.ConvTranspose2d):
+                    torch.nn.init.kaiming_normal_(module.weight, 0.1)
+                    if module.bias is not None:
+                        torch.nn.init.constant_(module.bias, 0)
+
+    print('Active Model parameters: {:,}'.format(count_parameters(model)))
 
     assert(args.solver in ['adam','adamw','sgd'])
     #if LooseVersion(torch.__version__) < LooseVersion('1.8.0') and args.solver == 'adamw':
@@ -555,17 +918,17 @@ def main():
     print('=> setting {} solver'.format(args.solver))
 
     if args.solver == 'adam':
-        kwargs = {'lr':             args.lr,
+        kwargs = {'lr':             args.lr if args.lr is not None else 25,
                   'weight_decay':   args.weight_decay,
                   'betas':          (args.betas[0],args.betas[1])}
         optimizer = torch.optim.Adam(model.parameters(), **kwargs)
     elif args.solver == 'adamw':
-        kwargs = {'lr':             args.lr,
-                  'weight_decay':   args.AdamW_weight_decay,
+        kwargs = {'lr':             args.lr if args.lr is not None else 25,
+                  'weight_decay':   args.weight_decay,
                   'betas':          (args.betas[0],args.betas[1])}
         optimizer = torch.optim.AdamW(model.parameters(), **kwargs)
     elif args.solver == 'sgd':
-        kwargs = {'lr':           args.lr,
+        kwargs = {'lr':           args.lr if args.lr is not None else 0.001,
                   'weight_decay': args.weight_decay,
                   'momentum':     args.momentum}
         optimizer = torch.optim.SGD(model.parameters(), **kwargs)
@@ -677,12 +1040,15 @@ def main():
                   'steps_per_epoch': train_loader_len}
         scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, **kwargs)
     elif args.scheduler == 'OneCycle':
+        div_factor = args.max_lr / args.lr if args.lr is not None else 25
+        #div_factor = 25
         OC_total_steps = int(args.num_steps / args.step_size) + 100
         kwargs = {'max_lr':          args.max_lr,
                   'total_steps':     OC_total_steps,
                   'pct_start':       args.pct_start,
                   'cycle_momentum':  False,
                   'anneal_strategy': args.anneal_strategy,
+                  'div_factor':      div_factor,
                   'steps_per_epoch': train_loader_len}
         scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, **kwargs)
     elif args.scheduler == 'cycliclr':
@@ -709,14 +1075,14 @@ def main():
         if args.lr_finder_Leslie_Smith:
             custom_val_iter = CustomValIter(loader_test)
             lr_finder = LRFinder(model, optimizer, args.loss_Flow_net, device="cuda")
-            lr_finder.range_test(train_loader, #custom_train_iter,
+            lr_finder.range_test(train_loaders[args.datasets[0]], #train_loader, #custom_train_iter,
                                  #val_loader = custom_val_iter,
                                  end_lr     = args.max_lr,
                                  num_iter   = num_iter,
                                  step_mode  = "linear")
         else:
             lr_finder = LRFinder(model, optimizer, args.loss_Flow_net, device="cuda")
-            lr_finder.range_test(train_loader, #custom_train_iter,
+            lr_finder.range_test(train_loaders[args.datasets[0]], #train_loader, #custom_train_iter,
                                  end_lr   = args.max_lr,
                                  num_iter = num_iter)
         lr_finder.plot(ax=ax)
@@ -769,22 +1135,33 @@ def main():
 
         # This is just for testing. Disable when not needed
         #torch.autograd.set_detect_anomaly(True)
+        
+        #model = torch.compile(model,
+        #                      dynamic=True
+        #                      #,mode='max-autotune'
+        #                      )
+        
         while args.total_steps <= args.max_num_steps:
-            #for i in range(len(args.datasets)):
-            if True:
-                args.mini_batch_size = mini_batch_sizes[args.datasets[0]]
-                args.accumulation_steps = int(args.batch_size / args.mini_batch_size)
-                args.epoch_size = len(train_loaders[args.datasets[0]]) if epoch_sizes[args.datasets[0]] == 0 else epoch_sizes[args.datasets[0]]
-                tqdm_train0.reset(total=args.epoch_size)
-                tqdm_train1.reset(total=args.epoch_size)
-                tqdm_train2.reset(total=args.epoch_size)
-                # train for one epoch
-                #train(train_loader, val_loader, model, optimizer, scheduler, train_writer, inverse_transform)
-                train(train_loaders[args.datasets[0]], val_loader, model, optimizer, scheduler, train_writer, inverse_transform, args.datasets[0])
-                args.train_loader_start = 0
+            #if args.total_steps < 120_000
+            #for name, param in model.named_parameters():
+            #    if param.requires_grad:
+            #        print name, param.data
+            #        exit()
 
-                if args.scheduler in ['steplr','multisteplr']:
-                    scheduler.step()
+            args.mini_batch_size = mini_batch_sizes[args.datasets[0]]
+            args.accumulation_steps = int(args.batch_size / args.mini_batch_size)
+            args.epoch_size = len(train_loaders[args.datasets[0]]) if epoch_sizes[args.datasets[0]] == 0 else epoch_sizes[args.datasets[0]]
+            args.scale = scales[args.datasets[0]]
+            tqdm_train0.reset(total=args.epoch_size)
+            tqdm_train1.reset(total=args.epoch_size)
+            tqdm_train2.reset(total=args.epoch_size)
+            # train for one epoch
+            #train(train_loader, val_loader, model, optimizer, scheduler, train_writer, inverse_transform)
+            train(train_loaders[args.datasets[0]], val_loader, model, optimizer, scheduler, train_writer, inverse_transform, args.datasets[0])
+            args.train_loader_start = 0
+
+            if args.scheduler in ['steplr','multisteplr']:
+                scheduler.step()
 
             #Rotate list left
             args.datasets.append(args.datasets.pop(0))
@@ -896,6 +1273,7 @@ def main():
         tqdm_test0.close()
         tqdm_test1.close()
         tqdm_test2.close()
+        print()
         raise
 
 
@@ -932,6 +1310,11 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
     flow4_max = 0
     flow5_max = 0
     flow6_max = 0
+    grad_max_mean = ''
+    lastWAUC = None
+    currentWAUC = 0
+    batch_norm = []
+    batch_norm_clipped = []
 
     for i, (inputs, target) in enumerate(train_loader):
         if i >= args.epoch_size:
@@ -941,82 +1324,111 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
                                         flow_Fls,
                                         flow_WAUCs,
                                         lr,
-                                        args.epoch_size))
+                                        args.epoch_size * 2))
             break
         args.total_steps += args.step_size / args.accumulation_steps
         # measure data loading time
         data_time.update(time.time() - end)
         frames_completed += target.size(0)
         mask = target[:,2,:,:].to(args.device)
-        target = target.to(args.device)
-        target[:,:2,:,:] *= mask[:,None,:,:]
+        target = target.to(args.device).nan_to_num(0,0,0)
+        if not args.scale_output:
+            target[:,:2,:,:] *= mask[:,None,:,:]
+        if args.clamp is not None:
+            target = torch.clamp(target, min=-1 * args.clamp, max=args.clamp)
         inputs = inputs.to(args.device)
         #b, N, c, intHeight, intWidth = inputs.size()
         #args.div_flow = max(intWidth, intHeight)
 
+        b, N, c, intHeight, intWidth = inputs.size()
+        #print('Input height: ',intHeight,', width: ',intWidth)
+        intPreprocessedWidth = int(math.floor(math.ceil(intWidth * args.scale / 64.0) * 64.0))
+        intPreprocessedHeight = int(math.floor(math.ceil(intHeight * args.scale / 64.0) * 64.0))
+        if intWidth != intPreprocessedWidth or intHeight != intPreprocessedHeight:
+            tensorFirst = F.interpolate(
+                            input         = inputs[:,0,:,:,:],
+                            size          = (intPreprocessedHeight, intPreprocessedWidth),
+                            mode          = 'bilinear',
+                            align_corners = True,
+                            antialias     = True)
+            tensorSecond = F.interpolate(
+                            input         = inputs[:,1,:,:,:],
+                            size          = (intPreprocessedHeight, intPreprocessedWidth),
+                            mode          = 'bilinear',
+                            align_corners = True,
+                            antialias     = True)
+
+            inputs = torch.stack((tensorFirst, tensorSecond), dim=1)
         
         with torch.cuda.amp.autocast():
-            outputs = model(inputs)
-        
-       
-        if args.split_losses:
-            loss_total, loss_EPE, loss_WAUCl = args.loss_Flow_net(outputs, target)
-          # Without .detach() there is a memory leak. Don't need grad on these
-            if args.useFlow1:
-                flow1_WAUC.update(100 - loss_WAUCl[0].detach(), target.size(0))
-            flow2_WAUC.update(100 - loss_WAUCl[1].detach(), target.size(0))
-            flow3_WAUC.update(100 - loss_WAUCl[2].detach(), target.size(0))
-            flow4_WAUC.update(100 - loss_WAUCl[3].detach(), target.size(0))
-            flow5_WAUC.update(100 - loss_WAUCl[4].detach(), target.size(0))
-            flow6_WAUC.update(100 - loss_WAUCl[5].detach(), target.size(0))
-            if args.useFlow1:
-                flow1_EPE.update(loss_EPE[0].detach(), target.size(0))
-            flow2_EPE.update(loss_EPE[1].detach(), target.size(0))
-            flow3_EPE.update(loss_EPE[2].detach(), target.size(0))
-            flow4_EPE.update(loss_EPE[3].detach(), target.size(0))
-            flow5_EPE.update(loss_EPE[4].detach(), target.size(0))
-            flow6_EPE.update(loss_EPE[5].detach(), target.size(0))
-            if args.useFlow1:
-                loss_EPE = loss_EPE[0].detach().cpu().numpy()
-                accuracy_WAUC = 100 - loss_WAUCl[0].detach()
+            if intWidth != intPreprocessedWidth or intHeight != intPreprocessedHeight:
+                OutputsUp = model(inputs)
+                outputs = [None,None,None,None,None,None]
+                for i in range(len(OutputsUp)):
+                    if OutputsUp[i] is not None:
+                        outputs[i] = F.interpolate(
+                                        input         = OutputsUp[i],
+                                        size          = (intHeight, intWidth),
+                                        mode          = 'bilinear',
+                                        align_corners = True,
+                                        antialias     = True)
+                        outputs[i][:, 0, :, :] *= intWidth / intPreprocessedWidth
+                        outputs[i][:, 1, :, :] *= intHeight / intPreprocessedHeight
             else:
-                loss_EPE = loss_EPE[1].detach().cpu().numpy()
-                accuracy_WAUC = 100 - loss_WAUCl[1].detach()
-        else:
-            loss_total = args.loss_Flow_net(outputs, target)
+                outputs = model(inputs)
+
+            if args.split_losses:
+                loss_total, loss_EPEs, loss_WAUCl = args.loss_Flow_net(outputs, target)
+              # Without .detach() there is a memory leak. Don't need grad on these
+                if loss_WAUCl[0] is not None:
+                    flow1_WAUC.update(100 - loss_WAUCl[0].detach(), target.size(0))
+                    flow1_EPE.update(loss_EPEs[0].detach(), target.size(0))
+                    loss_EPE = loss_EPEs[0].detach().cpu().numpy()
+                    accuracy_WAUC = 100 - loss_WAUCl[0].detach()
+                else:
+                    loss_EPE = loss_EPEs[1].detach().cpu().numpy()
+                    accuracy_WAUC = 100 - loss_WAUCl[1].detach()
+                flow2_WAUC.update(100 - loss_WAUCl[1].detach(), target.size(0))
+                flow3_WAUC.update(100 - loss_WAUCl[2].detach(), target.size(0))
+                flow4_WAUC.update(100 - loss_WAUCl[3].detach(), target.size(0))
+                flow5_WAUC.update(100 - loss_WAUCl[4].detach(), target.size(0))
+                flow6_WAUC.update(100 - loss_WAUCl[5].detach(), target.size(0))
+                flow2_EPE.update(loss_EPEs[1].detach(),
+                                 target.size(0))
+                flow3_EPE.update(loss_EPEs[2].detach(), target.size(0))
+                flow4_EPE.update(loss_EPEs[3].detach(), target.size(0))
+                flow5_EPE.update(loss_EPEs[4].detach(), target.size(0))
+                flow6_EPE.update(loss_EPEs[5].detach(), target.size(0))
+            else:
+                loss_total = args.loss_Flow_net(outputs, target)
         loss_total /= args.accumulation_steps
         scaler.scale(loss_total).backward()
         # record loss and EPE
-        flowGT_max = max(flowGT_max, target.detach().abs().max())
+        flowGT_max = max(flowGT_max, target[:,:2,:,:].detach().abs().max())
         
-        if args.useFlow1:
-            flow1_max = max(flow1_max, outputs[0].detach().abs().max())
-        flow2_max = max(flow2_max, outputs[1].detach().abs().max())
-        flow3_max = max(flow3_max, outputs[2].detach().abs().max())
-        flow4_max = max(flow4_max, outputs[3].detach().abs().max())
-        flow5_max = max(flow5_max, outputs[4].detach().abs().max())
-        flow6_max = max(flow6_max, outputs[5].detach().abs().max())
-        flowGT_mean.update(target.detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean(), target.size(0))
-        if args.useFlow1:
-            flow1_test = outputs[0].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        flow2_test = outputs[1].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        flow3_test = outputs[2].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        flow4_test = outputs[3].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        flow5_test = outputs[4].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        flow6_test = outputs[5].detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        if args.useFlow1:
-            if not np.isinf(flow1_test):
-                flow1_mean.update(flow1_test, target.size(0))
-        if not np.isinf(flow2_test):
-            flow2_mean.update(flow2_test, target.size(0))
-        if not np.isinf(flow3_test):
-            flow3_mean.update(flow3_test, target.size(0))
-        if not np.isinf(flow4_test):
-            flow4_mean.update(flow4_test, target.size(0))
-        if not np.isinf(flow5_test):
-            flow5_mean.update(flow5_test, target.size(0))
-        if not np.isinf(flow6_test):
-            flow6_mean.update(flow6_test, target.size(0))
+        B, C, H, W = target.shape
+        infinity = max(H,W)
+
+        if loss_WAUCl[0] is not None:
+            flow1_max = max(flow1_max, outputs[0].detach().nan_to_num(0,infinity,-infinity).abs().max())
+            flow1_test = ((outputs[0].detach().nan_to_num(0,infinity,-infinity) * mask[:,None,:,:]).abs().sum() / (C * mask.sum()))
+            flow1_mean.update(flow1_test, target.size(0))
+        flow2_max = max(flow2_max, outputs[1].detach().nan_to_num(0,infinity,-infinity).abs().max())
+        flow3_max = max(flow3_max, outputs[2].detach().nan_to_num(0,infinity,-infinity).abs().max())
+        flow4_max = max(flow4_max, outputs[3].detach().nan_to_num(0,infinity,-infinity).abs().max())
+        flow5_max = max(flow5_max, outputs[4].detach().nan_to_num(0,infinity,-infinity).abs().max())
+        flow6_max = max(flow6_max, outputs[5].detach().nan_to_num(0,infinity,-infinity).abs().max())
+        flowGT_mean.update(target[:,:2,:,:].detach().abs().sum() / (2 * mask.sum()), target.size(0))
+        flow2_test = ((outputs[1].detach().nan_to_num(0,infinity,-infinity) * mask[:,None,:,:]).abs().sum() / (C * mask.sum()))
+        flow3_test = ((outputs[2].detach().nan_to_num(0,infinity,-infinity) * mask[:,None,:,:]).abs().sum() / (C * mask.sum()))
+        flow4_test = ((outputs[3].detach().nan_to_num(0,infinity,-infinity) * mask[:,None,:,:]).abs().sum() / (C * mask.sum()))
+        flow5_test = ((outputs[4].detach().nan_to_num(0,infinity,-infinity) * mask[:,None,:,:]).abs().sum() / (C * mask.sum()))
+        flow6_test = ((outputs[5].detach().nan_to_num(0,infinity,-infinity) * mask[:,None,:,:]).abs().sum() / (C * mask.sum()))
+        flow2_mean.update(flow2_test, target.size(0))
+        flow3_mean.update(flow3_test, target.size(0))
+        flow4_mean.update(flow4_test, target.size(0))
+        flow5_mean.update(flow5_test, target.size(0))
+        flow6_mean.update(flow6_test, target.size(0))
 
         lr = scheduler.get_last_lr()[0]
         #outputs[0] = F.interpolate(
@@ -1030,23 +1442,22 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
         #accuracy_WAUC = realWAUC(outputs[0], target)
 
         if not args.split_losses:
-            if args.useFlow1:
+            if loss_WAUCl[0] is not None:
                 loss_EPE = realEPE(outputs[0].detach(), target).cpu().numpy()
                 accuracy_WAUC = realWAUC(outputs[0].detach(), target)
             else:
                 loss_EPE = realEPE(outputs[1].detach(), target).cpu().numpy()
                 accuracy_WAUC = realWAUC(outputs[1].detach(), target)
-        elif args.loss ==  '1*mWAUCl+2*mEPE1':
-            if args.useFlow1:
+        elif args.loss.find('mEPE1') > -1:
+            if loss_WAUCl[0] is not None:
                 loss_EPE = realEPE(outputs[0].detach(), target).cpu().numpy()
             else:
                 loss_EPE = realEPE(outputs[1].detach(), target).cpu().numpy()
-        if args.useFlow1:
+        if loss_WAUCl[0] is not None:
             loss_Fl = realFl(outputs[0].detach(), target)
         else:
             loss_Fl = realFl(outputs[1].detach(), target)
-        if not np.isinf(loss_EPE):
-            flow_EPEs.update(loss_EPE, target.size(0))
+        flow_EPEs.update(loss_EPE, target.size(0))
         flow_Fls.update(loss_Fl, torch.sum(mask).item())
         flow_WAUCs.update(accuracy_WAUC, torch.sum(mask).item())
         learningRates.update(lr, target.size(0))
@@ -1055,29 +1466,55 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
                                     flow_EPEs,
                                     flow_Fls,
                                     flow_WAUCs,
-                                    lr))
+                                    lr) + grad_max_mean)
         if args.total_steps % args.step_size == 0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+           # calculate gradient norms
+            for name, p in model.named_parameters():
+                #if p.requires_grad and (".weight" in name or ".bias" in name) and p.grad is not None and not p.grad.norm().isfinite():
+                #if p.requires_grad and p.grad is not None and not p.grad.norm().isfinite():
+                # Because of error_if_nonfinite for clip_grad_norm_ it will exit when this isn't finite
+                # So we will print out which modules aren't finite so we know where the problem exists.
+                #    print('Grad Not Finite: ',name)
+                if p.requires_grad and p.grad is not None and "weight" in name :
+                    norm_grad = p.grad.norm().detach().cpu().numpy()
+                    batch_norm.append(norm_grad)
+            if args.clip is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.clip, error_if_nonfinite=True)
+               # calculate gradient norms
+                for name, p in model.named_parameters():
+                    if p.requires_grad and p.grad is not None and ".weight" in name :
+                        norm_grad = p.grad.norm().detach().cpu().numpy()
+                        batch_norm_clipped.append(norm_grad)
+            grad_max_mean = '  [grad:{:.2f}/clipped:{:.2e}]'.format(np.mean(batch_norm),
+                                                                    np.mean(batch_norm_clipped))
             scaler.step(optimizer)
             scale = scaler.get_scale()
             scaler.update()
-            model.zero_grad(set_to_none=True)                # Reset gradients tensors
             skip_lr_sched = (scale > scaler.get_scale())
+            
             if not skip_lr_sched:
                 scheduler.step()
+
+            model.zero_grad(set_to_none=True)                # Reset gradients tensors
+            
             if args.total_steps % args.print_freq  == 0:
-                train_writer.add_scalar('Train/EPE',  flow_EPEs.avg,    global_step = args.total_steps, new_style = True)
-                train_writer.add_scalar('Train/Fl',   flow_Fls.avg,     global_step = args.total_steps, new_style = True)
-                train_writer.add_scalar('Train/WAUC', flow_WAUCs.avg,   global_step = args.total_steps, new_style = True)
-                train_writer.add_scalar('Train/lr',   learningRates.avg, global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/EPE',              flow_EPEs.avg,               global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/Fl',               flow_Fls.avg,                global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/WAUC',             flow_WAUCs.avg,              global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/lr',               learningRates.avg,           global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/Gradient_Norm',    np.mean(batch_norm),         global_step = args.total_steps, new_style = True)
+                train_writer.add_scalar('Train/Gradient_Clipped', np.mean(batch_norm_clipped), global_step = args.total_steps, new_style = True)
+                batch_norm = []
+                batch_norm_clipped = []
                 flow_EPEs.reset()
                 flow_Fls.reset()
                 flow_WAUCs.reset()
                 learningRates.reset()
             if (args.total_steps) % args.val_freq  == 0:
                 if args.split_losses:
-                    if args.useFlow1:
+                    if loss_WAUCl[0] is not None:
+                        currentWAUC = flow1_WAUC.avg
                         train_writer.add_scalars('split_WAUC',
                                                  {'flow1': flow1_WAUC.avg,
                                                   'flow2': flow2_WAUC.avg,
@@ -1097,6 +1534,7 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
                         flow1_WAUC.reset()
                         flow1_EPE.reset()
                     else:
+                        currentWAUC = flow2_WAUC.avg
                         train_writer.add_scalars('split_WAUC',
                                                  {'flow2': flow2_WAUC.avg,
                                                   'flow3': flow3_WAUC.avg,
@@ -1121,6 +1559,11 @@ def train(train_loader, val_loader, model, optimizer, scheduler, train_writer, i
                     flow4_EPE.reset()
                     flow5_EPE.reset()
                     flow6_EPE.reset()
+                    
+                    if lastWAUC is None or (lastWAUC - .1 * lastWAUC) < currentWAUC < (lastWAUC + .1 * lastWAUC):
+                        lastWAUC = currentWAUC
+                    else:
+                        raise Exception("WAUC deviation is greater than 10%")
                 #args.train_loader_start = i
                 batch_time.update(time.time() - end)
                 end = time.time()
@@ -1204,12 +1647,12 @@ def validate(val_loader, model, run_writer, inverse_transform):
         frames_completed += target.size(0)
         mask = target[:,2,:,:].to(args.device)
         #mask = mask.to(args.device)
-        target = target[:,:2,:,:].to(args.device)
-        target *= mask[:,None,:,:]
+        target = target.to(args.device).nan_to_num(0,0,0)
+        target[:,:2,:,:] *= mask[:,None,:,:]
         #target = target[:,:2,:,:].to(args.device)
         inputs = inputs.to(args.device)
-        input_mean.update(torch.mean(inputs).item(), target.size(0))
-        input_std.update(np.square(torch.mean(inputs).item()), target.size(0))
+        #input_mean.update(torch.mean(inputs).item(), target.size(0))
+        #input_std.update(np.square(torch.mean(inputs).item()), target.size(0))
 
 
         
@@ -1282,28 +1725,30 @@ def validate(val_loader, model, run_writer, inverse_transform):
         #                                        width  = intWidth)
         #print('output.resized',output.shape)
         #print('mask',mask.shape)
+        infinity = max(intHeight,intWidth)
+        output = output.nan_to_num(0,infinity,-infinity)
         output = F.interpolate(
                             input         = output,
                             size          = (intHeight, intWidth),
                             mode          = 'bilinear',
                             align_corners = False)
+        output *= mask[:,None,:,:]
         output[:, 0, :, :] *= intWidth / intPreprocessedWidth
         output[:, 1, :, :] *= intHeight / intPreprocessedHeight
+        output = output.nan_to_num(0,infinity,-infinity)
 
-
-        flowGT_max = max(flowGT_max, target.detach().abs().max())
-        flow2_max = max(flow2_max, output.detach().abs().max())
-        flowGT_mean.update(target.detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean(), target.size(0))
-        flow2_test = output.detach().nan_to_num(nan=0.0,posinf=0.0,neginf=0.0).abs().mean().cpu().numpy()
-        if not np.isinf(flow2_test):
-            flow2_mean.update(flow2_test, target.size(0))
+        mask_total = c * mask.sum()
+        flowGT_max = max(flowGT_max, target[:,:2,:,:].abs().max())
+        flow2_max = max(flow2_max, output.abs().max())
+        flowGT_mean.update(target[:,:2,:,:].abs().sum() / mask_total, target.size(0))
+        flow2_test = output[:,:2,:,:].float().abs().sum()
+        flow2_mean.update(flow2_test / mask_total, target.size(0))
 
 
         # compute output
-        flow2_EPE = realEPE(output*mask[:,None,:,:], target)
+        flow2_EPE = realEPE(output, target)
         flow2_Fl = realFl(output, target, mask)
         flow2_WAUC = realWAUC(output, target, mask)
-        output *= mask[:,None,:,:]
 
         # record EPE
         test_flow2_EPEs.update(flow2_EPE.item(), target.size(0))
@@ -1349,7 +1794,11 @@ def validate(val_loader, model, run_writer, inverse_transform):
                                          inputs[:, 1, :, :, :][0,:3].clamp(0,1).cpu(),
                                          1)
                 if j == 0:
+                    # The nondeterministic nature of ConvTranspose2d causes the graph to give a warning about deviations.
+                    # Enabling deterministic resolves this issue but slows down performance so only do it for add_graph
+                    cudnn.deterministic = True
                     run_writer.add_graph(model, inputs)
+                    cudnn.deterministic = False
 
             output_flow_image = flow_vis.flow_to_color(output[0,:2,:,:].permute((1,2,0)).detach().cpu().numpy().astype(np.float32),
                                                        clip_flow=None).transpose((2, 0, 1))
@@ -1366,7 +1815,7 @@ def validate(val_loader, model, run_writer, inverse_transform):
                                    test_flow2_Fls,
                                    test_flow2_WAUCs))
         tqdm_test2.set_description('Mean/Max '
-            '[GT: {:.1f}/{:.1f}][flow2: {:.1f}/{:.1f}]'.format(
+            '[GT: {:.1f}/{:.1f}][flow: {:.1f}/{:.1f}]'.format(
                 flowGT_mean.avg, flowGT_max,
                 flow2_mean.avg, flow2_max))
 

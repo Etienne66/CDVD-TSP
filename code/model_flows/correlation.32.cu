@@ -80,7 +80,7 @@ __global__ void kernel_Correlation_updateOutput(
     for (int j = 0; j < kernel_size; j++) { // HEIGHT
       for (int i = 0; i < kernel_size; i++) { // WIDTH
         int ji_off = ((j * kernel_size) + i) * bottomchannels;
-        for (int ch = ch_off; ch < bottomchannels; ch += (WARPS_PER_BLOCK*THREADS_PER_WARP)) {
+        for (int ch = ch_off; ch < bottomchannels; ch += (WARPS_PER_BLOCK*THREADS_PER_WARP)) { // CHANNELS
           int idx1 = ((item * bottomheight + y1+j) * bottomwidth + x1+i) * bottomchannels + ch;
           int idxPatchData = ji_off + ch;
           patch_data[idxPatchData] = rbot0[idx1];
@@ -102,7 +102,7 @@ __global__ void kernel_Correlation_updateOutput(
       for (int j = 0; j < kernel_size; j++) { // HEIGHT
         for (int i = 0; i < kernel_size; i++) { // WIDTH
           int ji_off = ((j * kernel_size) + i) * bottomchannels;
-          for (int ch = ch_off; ch < bottomchannels; ch += WARPS_PER_BLOCK*THREADS_PER_WARP) {
+          for (int ch = ch_off; ch < bottomchannels; ch += WARPS_PER_BLOCK*THREADS_PER_WARP) { // CHANNELS
             int x2 = x1 + s2o;
             int y2 = y1 + s2p;
             

@@ -33,6 +33,33 @@ def make_dataset(root, dataset_type='clean', train=True):
     return images
 
 
+def make_dataset3(root, dataset_type='clean', train=True):
+    flow_dir = 'flow'
+    train_test_dir = 'training' if train else 'test'
+    assert((root / train_test_dir / flow_dir).is_dir())
+    img_dir = dataset_type
+    assert((root / train_test_dir / img_dir).is_dir())
+
+    images = []
+    for scene_dir in (root / train_test_dir / flow_dir).iterdir():
+        if scene_dir.is_dir():
+            for flow_map in scene_dir.rglob('*.flo'):
+                f = flow_map.stem.split('_')
+                prefix = f[0]
+                frame_nb = int(f[1])
+                img0 = root / train_test_dir / img_dir / scene_dir.name / '{}_{:04d}.png'.format(prefix, frame_nb - 1)
+                img1 = root / train_test_dir / img_dir / scene_dir.name / '{}_{:04d}.png'.format(prefix, frame_nb)
+                img2 = root / train_test_dir / img_dir / scene_dir.name / '{}_{:04d}.png'.format(prefix, frame_nb + 1)
+                if not img0.is_file():
+                    img0 = img2
+                if not (    img0.is_file()
+                        and img1.is_file()
+                        and img2.is_file()):
+                    continue
+                images.append([[img0,img1,img2],flow_map])
+    return images
+
+
 def mpi_sintel_clean(root,
                      transform=None,
                      target_transform=None,
@@ -72,3 +99,29 @@ def mpi_sintel_both(root,
     #test_dataset = ListDataset(root, test_list1 + test_list2, transform, target_transform, flow_transforms.CenterCrop((384,1024)))
 
     return train_dataset#, test_dataset
+
+
+def mpi_sintel3_clean(root,
+                     transform=None,
+                     target_transform=None,
+                     co_transform=None,
+                     train=True):
+    train_list = make_dataset3(root / 'MPI_Sintel', 'clean', train=train)
+    train_dataset = ListDataset(root / 'MPI_Sintel', train_list, transform, target_transform, co_transform)
+    #test_dataset = ListDataset(root, test_list, transform, target_transform, flow_transforms.CenterCrop((384,1024)))
+
+    return train_dataset#, test_dataset
+
+
+def mpi_sintel3_final(root,
+                     transform=None,
+                     target_transform=None,
+                     co_transform=None,
+                     train=True):
+    train_list = make_dataset3(root / 'MPI_Sintel', 'final', train=train)
+    train_dataset = ListDataset(root / 'MPI_Sintel', train_list, transform, target_transform, co_transform)
+    #test_dataset = ListDataset(root, test_list, transform, target_transform, flow_transforms.CenterCrop((384,1024)))
+
+    return train_dataset#, test_dataset
+
+

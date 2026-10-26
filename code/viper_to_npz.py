@@ -23,8 +23,11 @@ from pathlib import Path
 
 if __name__ == '__main__':
     try:
-        dataset = Path('F:/workspaces/VIPER/The rest/train/flow') 
-        root_dir = Path('E:/workspaces/CDVD-TSP/datasets/VIPER/train/flow_new')
+        #dataset = Path('F:/workspaces/VIPER/Every 10th frame/train/flow') 
+        dataset = Path('F:/workspaces/VIPER/The rest/train/flow')
+        #dataset = Path('F:/workspaces/VIPER/backflow/train/flowbw')
+        root_dir = Path('E:/workspaces/CDVD-TSP/datasets/VIPER/train/flow')
+        #root_dir = Path('E:/workspaces/CDVD-TSP/datasets/VIPER/train/flowbw')
         for train_path in dataset.iterdir():
             #print('train_path',train_path.name)
             rootdir = root_dir / train_path.name
@@ -35,25 +38,29 @@ if __name__ == '__main__':
                     continue
                 filename =  rootdir / (flow_path.stem + '.npz')
                 #Skip files that have already been created
-                if filename.exists():
-                    if filename.stat().st_size > 0:
-                        continue
+                #if filename.exists():
+                #    if filename.stat().st_size > 0:
+                #        continue
                 print(filename)
                 with np.load(flow_path) as data: #, allow_pickle=True, encoding='bytes', fix_imports=True
                     flow_u = data['u']#.astype(np.float32)
                     flow_v = data['v']#.astype(np.float32)
                 h,w = flow_u.shape
-                flow_u_mask = flow_u
-                flow_v_mask = flow_v
+                flow = np.empty([h,w,2])
+                flow[:,:,0] = flow_u
+                flow[:,:,1] = flow_v
+                mask = get_gt_correspondence_mask(flow)
+                #flow_u_mask = flow_u
+                #flow_v_mask = flow_v
                 #print('h: ',h,', w: ',w)
-                invalid = np.logical_or(np.logical_or(np.isnan(flow_u_mask), np.isnan(flow_v_mask)),
-                                        np.logical_or(np.isinf(flow_u_mask), np.isinf(flow_v_mask)))
-                flow_u_mask[invalid] = 0
-                flow_v_mask[invalid] = 0
-                invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u_mask) >= w, np.abs(flow_v_mask) >= h))
-                flow_u_mask[invalid] = 0
-                flow_v_mask[invalid] = 0
-                mask = np.logical_not(invalid)
+                #invalid = np.logical_or(np.logical_or(np.isnan(flow_u_mask), np.isnan(flow_v_mask)),
+                #                        np.logical_or(np.isinf(flow_u_mask), np.isinf(flow_v_mask)))
+                #flow_u_mask[invalid] = 0
+                #flow_v_mask[invalid] = 0
+                #invalid = np.logical_or(invalid, np.logical_or(np.abs(flow_u_mask) >= w, np.abs(flow_v_mask) >= h))
+                #flow_u_mask[invalid] = 0
+                #flow_v_mask[invalid] = 0
+                #mask = np.logical_not(invalid)
                 zipf = zipfile.ZipFile(filename, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9)
                 with zipf.open('u.npy', mode='w', force_zip64=True) as f:
                     np.lib.format.write_array(f, np.asanyarray(flow_u))

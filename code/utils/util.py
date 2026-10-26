@@ -43,7 +43,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
     def __repr__(self):
-        return '{:.5f} ({:.5f})'.format(self.val, self.avg)
+        return '{:.3f} ({:.3f})'.format(self.val, self.avg)
 
 
 def flow2rgb(flow_map, max_value=None):

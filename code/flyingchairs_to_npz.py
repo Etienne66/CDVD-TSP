@@ -24,7 +24,7 @@ from pathlib import Path
 if __name__ == '__main__':
     try:
         dataset = Path('F:/workspaces/FlyingChairs2') 
-        root_dir = Path('F:/workspaces/CDVD-TSP/datasets/FlyingChairs2')
+        root_dir = Path('E:/workspaces/CDVD-TSP/datasets/FlyingChairs2')
         
         for train_path in dataset.iterdir():
             print(train_path.name)

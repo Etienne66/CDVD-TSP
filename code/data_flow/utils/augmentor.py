@@ -14,6 +14,8 @@ import torch.nn.functional as F
 
 import torchvision.transforms.functional as trans
 
+from ..listdataset import get_gt_correspondence_mask
+
 # img1, img2 are 3D np arrays of (H, W, 3). flow is (H, W, 2).
 # shift_sigmas is (u, v), i.e., (W, H).
 def random_shift(img1, img2, flow, shift_sigmas=(16,10)):
@@ -85,9 +87,88 @@ def random_shift(img1, img2, flow, shift_sigmas=(16,10)):
     valid_mask  = np.pad(valid_mask,    ((dy2, dy2), (dx2, dx2)), 'constant', constant_values=False)
 
     return img1a, img2a, flowa, valid_mask
-    
+
+
+# img1, img2 are 3D np arrays of (H, W, 3). flow is (H, W, 2).
+# shift_sigmas is (u, v), i.e., (W, H).
+def random_shift2(img1, img2, img3, flowF, flowB, shift_sigmas=(16,10)):
+    u_shift_sigma, v_shift_sigma = shift_sigmas
+    # 90% of dx and dy are within [-2*u_shift_sigma, 2*u_shift_sigma] 
+    # and [-2*v_shift_sigma, 2*v_shift_sigma].
+    # Make sure at most one of dx, dy is large. Otherwise the shift is too difficult.
+    if random.random() > 0.5:
+        dx = np.random.laplace(0, u_shift_sigma / 4)
+        dy = np.random.laplace(0, v_shift_sigma)
+    else:
+        dx = np.random.laplace(0, u_shift_sigma)
+        dy = np.random.laplace(0, v_shift_sigma / 4)
+    # Make sure dx and dy are even numbers.
+    dx = (int(dx) // 2) * 2
+    dy = (int(dy) // 2) * 2
+
+    # If flow=0, pixels at (dy, dx)_1a <-> (0, 0)_2a.
+    if dx >= 0 and dy >= 0:
+        # img1 is cropped at the bottom-right corner.               img1[:-dy, :-dx]
+        imgc_bound = (0,  img2.shape[0] - dy,  0,  img2.shape[1] - dx)
+        # img2 is shifted by (dx, dy) to the left and up. 
+        #                                                           img2[dy:,  dx:]
+        imgo_bound = (dy, img2.shape[0],       dx, img2.shape[1])
+    elif dx >= 0 and dy < 0:
+        # img1 is cropped at the right side, and shifted to the up. img1[-dy:, :-dx]
+        imgc_bound = (-dy, img2.shape[0],      0,  img2.shape[1] - dx)
+        # img2 is shifted to the left and cropped at the bottom.    img2[:dy,  dx:]
+        imgo_bound = (0,   img2.shape[0] + dy, dx, img2.shape[1])
+        # (dx, 0)_1 => (dx, dy)_1a, (dx, 0)_2 => (0, 0)_2a.
+        # So if flow=0, i.e., (dx, dy)_1 == (dx, dy)_2, then (dx, dy)_1a => (0, 0)_2a.
+    elif dx < 0 and dy >= 0:
+        # img1 is shifted to the left, and cropped at the bottom.   img1[:-dy, -dx:]
+        imgc_bound = (0,   img2.shape[0] - dy, -dx, img2.shape[1])
+        # img2 is cropped at the right side, and shifted to the up. img2[dy:,  :dx]
+        imgo_bound = (dy,  img2.shape[0],      0,   img2.shape[1] + dx)
+        # (0, dy)_1 => (dx, dy)_1a, (0, dy)_2 => (0, 0)_2a.
+        # So if flow=0, i.e., (dx, dy)_1 == (dx, dy)_2, then (dx, dy)_1a => (0, 0)_2a.        
+    elif dx < 0 and dy < 0:
+        # img1 is shifted by (-dx, -dy) to the left and up. img1[-dy:, -dx:]
+        imgc_bound = (-dy, img2.shape[0],      -dx, img2.shape[1])
+        # img2 is cropped at the bottom-right corner.       img2[:dy,  :dx]
+        imgo_bound = (0,   img2.shape[0] + dy, 0,   img2.shape[1] + dx)
+
+    reversed_12 = random.random() > 0.5
+
+    if reversed_12:
+        imgc_bound, imgo_bound = imgo_bound, imgc_bound
+        flow_delta = (-dx, -dy)
+    else:
+        flow_delta = (dx,  dy)
+
+    # T, B, L, R: top, bottom, left, right.
+    T1, B1, L1, R1 = imgc_bound
+    T2, B2, L2, R2 = imgo_bound
+    img2a = img2[T1:B1, L1:R1]
+    flow1 = flowF[T1:B1, L1:R1] - flow_delta
+    flow2 = flowB[T1:B1, L1:R1] - flow_delta
+    img1a = img1[T2:B2, L2:R2]
+    img3a = img3[T2:B2, L2:R2]
+
+    # Pad img1, img2 and flow by half of (dy, dx). Padding doesn't impact flow.
+    dx2, dy2 = abs(dx) // 2, abs(dy) // 2
+    # valid_mask: boolean array that indicates the remaining area after cropping/shifting.
+    validB_mask = np.ones(img1a.shape[:2], dtype=bool)
+    validF_mask = np.ones(img3a.shape[:2], dtype=bool)
+
+    img1a       = np.pad(img1a,         ((dy2, dy2), (dx2, dx2), (0, 0)), 'constant')
+    img2a       = np.pad(img2a,         ((dy2, dy2), (dx2, dx2), (0, 0)), 'constant')
+    img3a       = np.pad(img3a,         ((dy2, dy2), (dx2, dx2), (0, 0)), 'constant')
+    flow1       = np.pad(flow1,         ((dy2, dy2), (dx2, dx2), (0, 0)), 'constant')
+    flow2       = np.pad(flow2,         ((dy2, dy2), (dx2, dx2), (0, 0)), 'constant')
+    # constant_values: valid_mask is a boolean array. Padded with "False".
+    valid_mask  = np.pad(valid_mask,    ((dy2, dy2), (dx2, dx2)), 'constant', constant_values=False)
+
+    return img1a, img2a, flow1, flow2, validB_mask, validF_mask
+
+
 class FlowAugmentor:
-    def __init__(self, ds_name, crop_size, min_scale=-0.2, max_scale=0.5, spatial_aug_prob=0.8, 
+    def __init__(self, ds_name, crop_size, min_scale=-0.2, max_scale=0.5, spatial_aug_prob=0.25, 
                  blur_kernel=5, blur_sigma=-1, do_flip=True, shift_prob=0, shift_sigmas=(16,10)):
         self.ds_name = ds_name
         # spatial augmentation params
@@ -101,7 +182,7 @@ class FlowAugmentor:
         # flip augmentation params
         self.do_flip = do_flip
         self.h_flip_prob = 0.5
-        self.v_flip_prob = 0.1
+        self.v_flip_prob = 0.5
 
         # shift augmentation
         self.shift_prob = shift_prob
@@ -167,37 +248,34 @@ class FlowAugmentor:
 
     def spatial_transform(self, img1, img2, flow):
         # randomly sample scale
-        if torch.is_tensor(img1):
-            ht, wd = img1.shape[1:3]
-        else:
-            ht, wd = img1.shape[:2]
-        min_scale = np.maximum(
-            (self.crop_size[0] + 8) / float(ht), 
-            (self.crop_size[1] + 8) / float(wd))
+        ht, wd = img1.shape[:2]
+        if np.random.rand() < self.spatial_aug_prob: # and ht > self.crop_size[0] and wd > self.crop_size[1]:
+            # DOES NOT WORK unless there is cropping on both x & y
+            min_scale = np.maximum(
+                (self.crop_size[0] + 8) / float(ht), 
+                (self.crop_size[1] + 8) / float(wd))
 
-        scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
-        scale_x = scale
-        scale_y = scale
-        if np.random.rand() < self.stretch_prob:
-            scale_x *= 2 ** np.random.uniform(-self.max_stretch, self.max_stretch)
-            scale_y *= 2 ** np.random.uniform(-self.max_stretch, self.max_stretch)
-        
-        scale_x = np.clip(scale_x, min_scale, None)
-        scale_y = np.clip(scale_y, min_scale, None)
+            scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
+            scale_x = scale
+            scale_y = scale
+            if np.random.rand() < self.stretch_prob:
+                scale_x *= 2 ** np.random.uniform(-self.max_stretch, self.max_stretch)
+                scale_y *= 2 ** np.random.uniform(-self.max_stretch, self.max_stretch)
+            
+            scale_x = np.clip(scale_x, min_scale, None)
+            scale_y = np.clip(scale_y, min_scale, None)
 
-        if np.random.rand() < self.spatial_aug_prob:
             # rescale the images
             if torch.is_tensor(img1):
-                img1 = trans.resize(img1, size=[(ht*scale_y).astype(int), (wd*scale_x).astype(int)], interpolation=trans.InterpolationMode.BICUBIC)
-                img2 = trans.resize(img2, size=[(ht*scale_y).astype(int), (wd*scale_x).astype(int)], interpolation=trans.InterpolationMode.BICUBIC)
-                flow = trans.resize(flow, size=[(ht*scale_y).astype(int), (wd*scale_x).astype(int)], interpolation=trans.InterpolationMode.BICUBIC)
-                flow[0] *= scale_y
-                flow[1] *= scale_x
+                newsize = [(ht*scale_y).astype(int), (wd*scale_x).astype(int)]
+                img1 = trans.resize(img1, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img2 = trans.resize(img2, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                flow = trans.resize(flow, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=False)
             else:
-                img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-                img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-                flow = cv2.resize(flow, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-                flow = flow * [scale_x, scale_y]
+                img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                flow = cv2.resize(flow, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+            flow = flow * [scale_x, scale_y]
             
 
         if self.do_flip:
@@ -223,27 +301,12 @@ class FlowAugmentor:
                     img2 = img2[::-1, :]
                     flow = flow[::-1, :] * [1.0, -1.0]
 
-        if torch.is_tensor(img1):
-            y0 = np.random.randint(0, img1.shape[1] - self.crop_size[0])
-            x0 = np.random.randint(0, img1.shape[2] - self.crop_size[1])
-            img1 = img1[:, y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-            img2 = img2[:, y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-            flow = flow[:, y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-        else:
-            if img1.shape[0] > self.crop_size[0]:
-                y0 = np.random.randint(0, img1.shape[0] - self.crop_size[0])
-            else:
-                y0 = 0
-            if img1.shape[1] > self.crop_size[1]:
-                x0 = np.random.randint(0, img1.shape[1] - self.crop_size[1])
-            else:
-                x0 = 0
+        if ht > self.crop_size[0] or wd > self.crop_size[1]:
+            y0 = np.random.randint(0, img1.shape[0] - self.crop_size[0])
+            x0 = np.random.randint(0, img1.shape[1] - self.crop_size[1])
             img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
             img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
             flow = flow[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-            #else:
-            #    print('img1.shape[0]',img1.shape[0],'self.crop_size[0]',self.crop_size[0])
-            #    print('img1.shape[1]',img1.shape[1],'self.crop_size[1]',self.crop_size[1])
 
         return img1, img2, flow
         
@@ -280,7 +343,7 @@ class FlowAugmentor:
 
 class SparseFlowAugmentor:
     def __init__(self, ds_name, crop_size, min_scale=-0.2, max_scale=0.5, 
-                 spatial_aug_prob=0.8, do_flip=False, shift_prob=0, shift_sigmas=(16,10)):
+                 spatial_aug_prob=0.25, do_flip=False, shift_prob=0, shift_sigmas=(16,10)):
         self.ds_name = ds_name
         # spatial augmentation params
         self.crop_size = crop_size
@@ -293,7 +356,7 @@ class SparseFlowAugmentor:
         # flip augmentation params
         self.do_flip = do_flip
         self.h_flip_prob = 0.5
-        self.v_flip_prob = 0.1
+        self.v_flip_prob = 0.5
 
         # photometric augmentation params
         self.photo_aug = ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.3/3.14)
@@ -365,42 +428,65 @@ class SparseFlowAugmentor:
         # randomly sample scale
 
         ht, wd = img1.shape[:2]
-        # min_scale: the scale is at least min_scale.
-        min_scale = np.maximum(
-            (self.crop_size[0] + 1) / float(ht), 
-            (self.crop_size[1] + 1) / float(wd))
+        if np.random.rand() < self.spatial_aug_prob: # and ht > self.crop_size[0] and wd > self.crop_size[1]:
+            # DOES NOT WORK unless there is cropping on both x & y
+            # min_scale: the scale is at least min_scale.
+            min_scale = np.maximum(
+                (self.crop_size[0] + 1) / float(ht), 
+                (self.crop_size[1] + 1) / float(wd))
 
-        scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
-        scale_x = np.clip(scale, min_scale, None)
-        scale_y = np.clip(scale, min_scale, None)
-        
-        if np.random.rand() < self.spatial_aug_prob:
-            # rescale the images
-            img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-            img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_CUBIC)
-            flow, valid = self.resize_sparse_flow_map(flow, valid, fx=scale_x, fy=scale_y)
+            scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
+            scale_x = np.clip(scale, min_scale, None)
+            scale_y = np.clip(scale, min_scale, None)
             
+            # rescale the images
+            if torch.is_tensor(img1):
+                newsize = [(ht*scale_y).astype(int), (wd*scale_x).astype(int)]
+                img1 = trans.resize(img1, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img2 = trans.resize(img2, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                flow = trans.resize(flow, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=False)
+                flow = flow * [scale_x, scale_y]
+            else:
+                img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                flow, valid = self.resize_sparse_flow_map(flow, valid, fx=scale_x, fy=scale_y)
+            
+        if img2.shape[0] > self.crop_size[0] or img2.shape[1] > self.crop_size[1]:
+            y0 = np.random.randint(0, img2.shape[0] - self.crop_size[0])
+            x0 = np.random.randint(0, img2.shape[1] - self.crop_size[1])
+            img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+            img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+            flow = flow[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+            valid = valid[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+
         if self.do_flip:
-            if np.random.rand() < 0.5: # h-flip
-                img1 = img1[:, ::-1]
-                img2 = img2[:, ::-1]
-                flow = flow[:, ::-1] * [-1.0, 1.0]
-                valid = valid[:, ::-1]
+            if np.random.rand() < self.h_flip_prob: # h-flip
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(2,))
+                    img2 = torch.flip(img2, dims=(2,))
+                    flow = torch.flip(flow, dims=(2,))
+                    flow[0] *= -1.0
+                    valid = torch.flip(valid, dims=(2,))
+                else:
+                    img1 = img1[:, ::-1]
+                    img2 = img2[:, ::-1]
+                    flow = flow[:, ::-1] * [-1.0, 1.0]
+                    valid = valid[:, ::-1]
 
-        margin_y = 20
-        margin_x = 50
+            if np.random.rand() < self.v_flip_prob: # v-flip
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(1,))
+                    img2 = torch.flip(img2, dims=(1,))
+                    flow = torch.flip(flow, dims=(1,))
+                    flow[1] *= -1.0
+                    valid = torch.flip(valid, dims=(1,))
+                else:
+                    img1 = img1[::-1, :]
+                    img2 = img2[::-1, :]
+                    flow = flow[::-1, :] * [1.0, -1.0]
+                    valid = valid[::-1, :]
 
-        y0 = np.random.randint(0, img1.shape[0] - self.crop_size[0] + margin_y)
-        x0 = np.random.randint(-margin_x, img1.shape[1] - self.crop_size[1] + margin_x)
 
-        y0 = np.clip(y0, 0, img1.shape[0] - self.crop_size[0])
-        x0 = np.clip(x0, 0, img1.shape[1] - self.crop_size[1])
-
-        img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-        img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-        flow = flow[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-        valid = valid[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
-        # print(img1.shape)
         return img1, img2, flow, valid
 
     # img1, img2: (H, W, 3). valid: (H, W)
@@ -422,3 +508,597 @@ class SparseFlowAugmentor:
         valid = np.ascontiguousarray(valid)
 
         return img1, img2, flow, valid
+
+
+class FlowAugmentor2:
+    def __init__(self, ds_name, crop_size, min_scale=-0.2, max_scale=0.5, spatial_aug_prob=0.25, 
+                 blur_kernel=5, blur_sigma=-1, do_flip=True, shift_prob=0, shift_sigmas=(16,10)):
+        self.ds_name = ds_name
+        # spatial augmentation params
+        self.crop_size = crop_size
+        self.min_scale = min_scale
+        self.max_scale = max_scale
+        self.spatial_aug_prob = spatial_aug_prob
+        self.stretch_prob = 0.8
+        self.max_stretch = 0.2
+
+        # flip augmentation params
+        self.do_flip = do_flip
+        self.h_flip_prob = 0.5
+        self.v_flip_prob = 0.5
+
+        # shift augmentation
+        self.shift_prob = shift_prob
+        # 90% of dx and dy are within [-2*u_shift_sigma, 2*u_shift_sigma] 
+        # and [-2*v_shift_sigma, 2*v_shift_sigma].
+        self.shift_sigmas = shift_sigmas        
+
+        # photometric augmentation params
+        self.photo_aug = ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14)
+        
+        self.asymmetric_color_aug_prob = 0.2
+        self.eraser_aug_prob = 0.5
+
+        self.blur_kernel = blur_kernel
+        self.blur_sigma = blur_sigma
+
+    def color_transform(self, img1, img2, img3):
+        """ Photometric augmentation """
+
+        # Numpy HWC -> CHW Torch
+        # asymmetric
+        if np.random.rand() < self.asymmetric_color_aug_prob:
+            if torch.is_tensor(img1):
+                img1 = self.photo_aug(img1)
+                img2 = self.photo_aug(img2)
+                img3 = self.photo_aug(img3)
+            else:
+                img1 = np.array(self.photo_aug(Image.fromarray(img1)), dtype=np.uint8)
+                img2 = np.array(self.photo_aug(Image.fromarray(img2)), dtype=np.uint8)
+                img3 = np.array(self.photo_aug(Image.fromarray(img3)), dtype=np.uint8)
+
+        # symmetric
+        else:
+            if torch.is_tensor(img1):
+                image_stack = torch.cat([img1, img2, img3], dim=1)
+                image_stack = self.photo_aug(image_stack)
+                img1, img2, img3 = torch.split(image_stack, split_size_or_sections=img1.shape[1], dim=1)
+            else:
+                image_stack = np.concatenate([img1, img2, img3], axis=0)
+                image_stack = np.array(self.photo_aug(Image.fromarray(image_stack)), dtype=np.uint8)
+                img1, img2, img3 = np.split(image_stack, 3, axis=0)
+
+        return img1, img2, img3
+
+    def eraser_transform(self, img1, img2, img3, bounds=[50, 100]):
+        """ Occlusion augmentation """
+
+        # Numpy HWC -> CHW Torch
+        if torch.is_tensor(img2):
+            _, ht, wd = img2.size()
+        else:
+            ht, wd = img2.shape[:2]
+        if np.random.rand() < self.eraser_aug_prob:
+            #print('img1.size',img1.shape)
+            #print('img1.reshape(-1, 3).size',img1.reshape(-1, 3).shape)
+            #exit()
+            if torch.is_tensor(img2):
+                mean_colorF = torch.mean(img1.permute((1,2,0)).reshape(-1, 3), axis=0)
+                mean_colorB = torch.mean(img3.permute((1,2,0)).reshape(-1, 3), axis=0)
+            else:
+                mean_colorF = np.mean(img1.reshape(-1, 3), axis=0)
+                mean_colorB = np.mean(img3.reshape(-1, 3), axis=0)
+            for _ in range(np.random.randint(1, 3)):
+                x0 = np.random.randint(0, wd)
+                y0 = np.random.randint(0, ht)
+                dx = np.random.randint(50, 100)
+                dy = np.random.randint(50, 100)
+                if torch.is_tensor(img1):
+                    #img1[0, y0:y0+dy, x0:x0+dx] = mean_colorF[0]
+                    #img1[1, y0:y0+dy, x0:x0+dx] = mean_colorF[1]
+                    #img1[2, y0:y0+dy, x0:x0+dx] = mean_colorF[2]
+                    img1[:, y0:y0+dy, x0:x0+dx] = mean_colorF[:,None,None]
+                else:
+                    img1[y0:y0+dy, x0:x0+dx, :] = mean_colorF
+            for _ in range(np.random.randint(1, 3)):
+                x0 = np.random.randint(0, wd)
+                y0 = np.random.randint(0, ht)
+                dx = np.random.randint(50, 100)
+                dy = np.random.randint(50, 100)
+                if torch.is_tensor(img3):
+                    #img3[0, y0:y0+dy, x0:x0+dx] = mean_colorB[0]
+                    #img3[1, y0:y0+dy, x0:x0+dx] = mean_colorB[1]
+                    #img3[2, y0:y0+dy, x0:x0+dx] = mean_colorB[2]
+                    img3[:, y0:y0+dy, x0:x0+dx] = mean_colorB[:,None,None]
+                else:
+                    img3[y0:y0+dy, x0:x0+dx, :] = mean_colorB
+
+        return img1, img2, img3
+
+    def spatial_transform(self, img1, img2, img3, flowB, flowF):
+        # randomly sample scale
+        if torch.is_tensor(img2):
+            _, ht, wd = img2.size()
+        else:
+            ht, wd = img2.shape[:2]
+        if np.random.rand() < self.spatial_aug_prob: # and ht > self.crop_size[0] and wd > self.crop_size[1]:
+            # DOES NOT WORK unless there is cropping on both x & y
+            # min_scale: the scale is at least min_scale.
+            min_scale = np.maximum(
+                (self.crop_size[0] + 1) / float(ht), 
+                (self.crop_size[1] + 1) / float(wd))
+
+            scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
+            scale_x = np.clip(scale, min_scale, None)
+            scale_y = np.clip(scale, min_scale, None)
+            y0 = np.random.randint(0, ht*scale_x - self.crop_size[0])
+            x0 = np.random.randint(0, wd*scale_y - self.crop_size[1])
+
+            # rescale the images
+            if torch.is_tensor(img1):
+                scale_x = torch.tensor(scale_x)
+                scale_y = torch.tensor(scale_y)
+                #print('img1',img1.size())
+                #print('flowB',flowB.size())
+                newsize = [(ht*scale_y).round().int(), (wd*scale_x).round().int()]
+                img1 =  trans.resize(img1, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img1 =  trans.crop(img1,  top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img2 =  trans.resize(img2, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img2 =  trans.crop(img2,  top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img3 =  trans.resize(img3, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img3 =  trans.crop(img3,  top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowB = trans.resize(flowB, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                flowB = trans.crop(flowB, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowF = trans.resize(flowF, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                flowF = trans.crop(flowF, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowB[0] *= scale_x
+                flowB[1] *= scale_y
+                flowF[0] *= scale_x
+                flowF[1] *= scale_y
+            else:
+                img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR) #INTER_LANCZOS4 INTER_LINEAR
+                img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img3 = cv2.resize(img3, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                img3 = img3[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowB = cv2.resize(flowB, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                flowB = flowB[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowF = cv2.resize(flowF, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                flowF = flowF[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowB *= [scale_x, scale_y]
+                flowF *= [scale_x, scale_y]
+
+        if torch.is_tensor(img2):
+            _, ht, wd = img2.size()
+        else:
+            ht, wd = img2.shape[:2]
+
+        if ht > self.crop_size[0] or wd > self.crop_size[1]:
+            if ht - self.crop_size[0] > 0:
+                y0 = np.random.randint(0, ht - self.crop_size[0])
+            else:
+                y0 = 0
+
+            if wd - self.crop_size[1] > 0:
+                x0 = np.random.randint(0, wd - self.crop_size[1])
+            else:
+                x0 = 0
+            
+            if torch.is_tensor(img1):
+                img1 =  trans.crop(img1,  top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img2 =  trans.crop(img2,  top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img3 =  trans.crop(img3,  top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowB = trans.crop(flowB, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowF = trans.crop(flowF, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+            else:
+                img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img3 = img3[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowB = flowB[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowF = flowF[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+
+        if self.do_flip:
+            if np.random.rand() < self.h_flip_prob: # h-flip
+                # Numpy HWC -> CHW Torch
+                # Valid HW
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(2,))
+                    img2 = torch.flip(img2, dims=(2,))
+                    img3 = torch.flip(img3, dims=(2,))
+                    flowB = torch.flip(flowB, dims=(2,))
+                    flowF = torch.flip(flowF, dims=(2,))
+                    flowB[0,:,:] *= -1.0
+                    flowF[0,:,:] *= -1.0
+                else:
+                    img1 = img1[:, ::-1]
+                    img2 = img2[:, ::-1]
+                    img3 = img3[:, ::-1]
+                    flowB = flowB[:, ::-1] * [-1.0, 1.0]
+                    flowF = flowF[:, ::-1] * [-1.0, 1.0]
+
+            if np.random.rand() < self.v_flip_prob: # v-flip
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(1,))
+                    img2 = torch.flip(img2, dims=(1,))
+                    img3 = torch.flip(img3, dims=(1,))
+                    flowB = torch.flip(flowB, dims=(1,))
+                    flowF = torch.flip(flowF, dims=(1,))
+                    flowB[1,:,:] *= -1.0
+                    flowF[1,:,:] *= -1.0
+                else:
+                    img1 = img1[::-1, :]
+                    img2 = img2[::-1, :]
+                    img3 = img3[::-1, :]
+                    flowB = flowB[::-1, :] * [1.0, -1.0]
+                    flowF = flowF[::-1, :] * [1.0, -1.0]
+
+
+        return img1, img2, img3, flowB, flowF
+        
+    def __call__(self, img1, img2, img3, flowB, flowF):
+        img1, img2, img3, flowB, flowF = self.spatial_transform(img1, img2, img3, flowB, flowF)
+        img1, img2, img3 = self.color_transform(img1, img2, img3)
+        img1, img2, img3 = self.eraser_transform(img1, img2, img3)
+
+        validB = None
+        validF = None
+        if self.shift_prob > 0 and random.random() < self.shift_prob:
+            img1, img2, img3, flowB, flowF, validB, validF = random_shift2(img1, img2, img3, flowB, flowF, self.shift_sigmas)
+
+        if self.blur_sigma > 0:
+            K = self.blur_kernel
+            if torch.is_tensor(img1):
+                gaussianblur = GaussianBlur(kernel_size=(K, K), sigma=self.blur_sigma)
+                img1 = gaussianblur(img1)
+                img2 = gaussianblur(img2)
+                img3 = gaussianblur(img3)
+            else:
+                img1 = cv2.GaussianBlur(img1, (K, K), self.blur_sigma)
+                img2 = cv2.GaussianBlur(img2, (K, K), self.blur_sigma)
+                img3 = cv2.GaussianBlur(img3, (K, K), self.blur_sigma)
+
+        if torch.is_tensor(img1):
+            img1 = img1.contiguous()
+            img2 = img2.contiguous()
+            img3 = img3.contiguous()
+            flowB = flowB.contiguous()
+            flowF = flowF.contiguous()
+        else:
+            img1 = np.ascontiguousarray(img1)
+            img2 = np.ascontiguousarray(img2)
+            img3 = np.ascontiguousarray(img3)
+            flowB = np.ascontiguousarray(flowB)
+            flowF = np.ascontiguousarray(flowF)
+
+        return img1, img2, img3, flowB, flowF, validB, validF
+
+
+class SparseFlowAugmentor2:
+    def __init__(self, ds_name, crop_size, min_scale=-0.2, max_scale=0.5, spatial_aug_prob=0.25,
+                 blur_kernel=5, blur_sigma=-1, do_flip=True, shift_prob=0, shift_sigmas=(16,10)):
+        self.ds_name = ds_name
+        # spatial augmentation params
+        self.crop_size = crop_size
+        self.min_scale = min_scale
+        self.max_scale = max_scale
+        self.spatial_aug_prob = spatial_aug_prob
+        self.stretch_prob = 0.8
+        self.max_stretch = 0.2
+
+        # flip augmentation params
+        self.do_flip = do_flip
+        self.h_flip_prob = 0.5
+        self.v_flip_prob = 0.5
+
+        # shift augmentation
+        self.shift_prob = shift_prob
+        # 90% of dx and dy are within [-2*u_shift_sigma, 2*u_shift_sigma] 
+        # and [-2*v_shift_sigma, 2*v_shift_sigma].
+        self.shift_sigmas = shift_sigmas
+
+        # photometric augmentation params
+        self.photo_aug = ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.5/3.14)
+
+        self.asymmetric_color_aug_prob = 0.2
+        self.eraser_aug_prob = 0.5
+
+        self.blur_kernel = blur_kernel
+        self.blur_sigma = blur_sigma
+
+    def color_transform(self, img1, img2, img3):
+        # Numpy HWC -> CHW Torch
+        if torch.is_tensor(img2):
+            _, ht, wd = img2.size()
+            if np.random.rand() < self.asymmetric_color_aug_prob:
+                img1 = self.photo_aug(img1)
+                img2 = self.photo_aug(img2)
+                img3 = self.photo_aug(img3)
+            else:
+                image_stack = torch.cat([img1, img2, img3], dim=1)
+                image_stack = self.photo_aug(image_stack)
+                img1, img2, img3 = torch.split(image_stack, ht, dim=1)
+        else:
+            if np.random.rand() < self.asymmetric_color_aug_prob:
+                img1 = np.array(self.photo_aug(Image.fromarray(img1)), dtype=np.uint8)
+                img2 = np.array(self.photo_aug(Image.fromarray(img2)), dtype=np.uint8)
+                img3 = np.array(self.photo_aug(Image.fromarray(img3)), dtype=np.uint8)
+            else:
+                image_stack = np.concatenate([img1, img2, img3], axis=0)
+                image_stack = np.array(self.photo_aug(Image.fromarray(image_stack)), dtype=np.uint8)
+                img1, img2, img3 = np.split(image_stack, 3, axis=0)
+        return img1, img2, img3
+
+    def eraser_transform(self, img1, img2, img3):
+        # Numpy HWC -> CHW Torch
+        if torch.is_tensor(img2):
+            _, ht, wd = img2.size()
+        else:
+            ht, wd = img2.shape[:2]
+        if np.random.rand() < self.eraser_aug_prob:
+            #print('img1.size',img1.shape)
+            #print('img1.reshape(-1, 3).size',img1.reshape(-1, 3).shape)
+            #exit()
+            if torch.is_tensor(img2):
+                mean_colorF = torch.mean(img1.reshape(-1, 3), axis=0)
+                mean_colorB = torch.mean(img3.reshape(-1, 3), axis=0)
+            else:
+                mean_colorF = np.mean(img1.reshape(-1, 3), axis=0)
+                mean_colorB = np.mean(img3.reshape(-1, 3), axis=0)
+            for _ in range(np.random.randint(1, 3)):
+                x0 = np.random.randint(0, wd)
+                y0 = np.random.randint(0, ht)
+                dx = np.random.randint(50, 100)
+                dy = np.random.randint(50, 100)
+                if torch.is_tensor(img1):
+                    img1[0, y0:y0+dy, x0:x0+dx] = mean_colorF[0]
+                    img1[1, y0:y0+dy, x0:x0+dx] = mean_colorF[1]
+                    img1[2, y0:y0+dy, x0:x0+dx] = mean_colorF[2]
+                else:
+                    img1[y0:y0+dy, x0:x0+dx, :] = mean_colorF
+            for _ in range(np.random.randint(1, 3)):
+                x0 = np.random.randint(0, wd)
+                y0 = np.random.randint(0, ht)
+                dx = np.random.randint(50, 100)
+                dy = np.random.randint(50, 100)
+                if torch.is_tensor(img3):
+                    img3[0, y0:y0+dy, x0:x0+dx] = mean_colorF[0]
+                    img3[1, y0:y0+dy, x0:x0+dx] = mean_colorF[1]
+                    img3[2, y0:y0+dy, x0:x0+dx] = mean_colorF[2]
+                else:
+                    img3[y0:y0+dy, x0:x0+dx, :] = mean_colorB
+
+        return img1, img2, img3
+
+    def resize_sparse_flow_map(self, flow, valid, fx=1.0, fy=1.0):
+        ht, wd = flow.shape[:2]
+        coords = np.meshgrid(np.arange(wd), np.arange(ht), indexing='ij')
+        coords = np.stack(coords, axis=-1)
+
+        coords = coords.reshape(-1, 2).astype(np.float32)
+        flow = flow.reshape(-1, 2).astype(np.float32)
+        valid = valid.reshape(-1).astype(np.float32)
+
+        coords0 = coords[valid>=1]
+        flow0 = flow[valid>=1]
+
+        ht1 = int(round(ht * fy))
+        wd1 = int(round(wd * fx))
+
+        coords1 = coords0 * [fx, fy]
+        flow1 = flow0 * [fx, fy]
+
+        xx = np.round(coords1[:,0]).astype(np.int32)
+        yy = np.round(coords1[:,1]).astype(np.int32)
+
+        v = (xx > 0) & (xx < wd1) & (yy > 0) & (yy < ht1)
+        xx = xx[v]
+        yy = yy[v]
+        flow1 = flow1[v]
+
+        flow_img = np.zeros([ht1, wd1, 2], dtype=np.float32)
+        valid_img = np.zeros([ht1, wd1], dtype=np.int32)
+
+        flow_img[yy, xx] = flow1
+        valid_img[yy, xx] = 1
+
+        return flow_img, valid_img
+
+    # crop_size: minimal image size after resizing. 
+    # Images are cropped to crop_size at the end of spatial_transform().
+    def spatial_transform(self, img1, img2, img3, flowB, flowF, validB, validF):
+        # randomly sample scale
+
+        if torch.is_tensor(img2):
+            _, ht, wd = img2.size()
+        else:
+            ht, wd = img2.shape[:2]
+        if np.random.rand() < self.spatial_aug_prob: # and ht > self.crop_size[0] and wd > self.crop_size[1]:
+            # DOES NOT WORK unless there is cropping on both x & y
+            # min_scale: the scale is at least min_scale.
+            min_scale = np.maximum(
+                (self.crop_size[0] + 1) / float(ht), 
+                (self.crop_size[1] + 1) / float(wd))
+
+            scale = 2 ** np.random.uniform(self.min_scale, self.max_scale)
+            scale_x = np.clip(scale, min_scale, None)
+            scale_y = np.clip(scale, min_scale, None)
+            y0 = np.random.randint(0, ht*scale_x - self.crop_size[0])
+            x0 = np.random.randint(0, wd*scale_y - self.crop_size[1])
+            
+                                                        
+        
+            # rescale the images
+            if torch.is_tensor(img2):
+                #RandomResizedCrop = trans.RandomResizedCrop(size          = (self.crop_size[0],self.crop_size[1]),
+                #                                            scale         = (2 ** min_scale, 2 ** self.max_scale),
+                #                                            interpolation = trans.InterpolationMode.BILINEAR,
+                #                                            antialias     = True)
+                #image_stack = torch.cat([img1, img2, img3, flowF, flowB], dim=1)
+                #image_stack = RandomResizedCrop(image_stack)
+                #img1, img2, img3, flowF, flowB = torch.split(image_stack, split_size_or_sections=[3,3,3,2,2], dim=1)
+
+                newsize = [(ht*scale_y.astype(int)).astype(int), (wd*scale_x.astype(int)).astype(int)]
+                img1 = trans.resize(img1, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img1 = trans.crop(img1, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img2 = trans.resize(img2, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img2 = trans.crop(img2, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img3 = trans.resize(img3, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=True)
+                img3 = trans.crop(img3, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowB = trans.resize(flowB, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=False)
+                flowB = trans.crop(flowB, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowF = trans.resize(flowF, size=newsize, interpolation=trans.InterpolationMode.BILINEAR, antialias=False)
+                flowF = trans.crop(flowF, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowB[0] *= scale_x
+                flowB[1] *= scale_y
+                flowF[0] *= scale_x
+                flowF[1] *= scale_y
+            else:
+                img1 = cv2.resize(img1, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img2 = cv2.resize(img2, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img3 = cv2.resize(img3, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                img3 = img3[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                #flowF, validF = self.resize_sparse_flow_map(flowF, validF, fx=scale_x, fy=scale_y)
+                #flowB, validB = self.resize_sparse_flow_map(flowB, validB, fx=scale_x, fy=scale_y)
+                flowB = cv2.resize(flowB, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                flowB = flowB[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowF = cv2.resize(flowF, None, fx=scale_x, fy=scale_y, interpolation=cv2.INTER_LINEAR)
+                flowF = flowF[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowB *= [scale_x, scale_y]
+                flowF *= [scale_x, scale_y]
+
+        #    validF = get_gt_correspondence_mask(flowF)
+        #    validB = get_gt_correspondence_mask(flowB)
+        #else:
+        #    validF = get_gt_correspondence_mask(flowF)
+        #    validB = get_gt_correspondence_mask(flowB)
+        
+        if torch.is_tensor(img2):
+            _, ht, wd = img2.size()
+        else:
+            ht, wd = img2.shape[:2]
+            
+        if ht > self.crop_size[0] or wd > self.crop_size[1]:
+            if ht - self.crop_size[0] > 0:
+                y0 = np.random.randint(0, ht - self.crop_size[0])
+            else:
+                y0 = 0
+
+            if wd - self.crop_size[1] > 0:
+                x0 = np.random.randint(0, wd - self.crop_size[1])
+            else:
+                x0 = 0
+            
+            if torch.is_tensor(img1):
+                img1 = trans.crop(img1, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img2 = trans.crop(img2, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                img3 = trans.crop(img3, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowB = trans.crop(flowB, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                flowF = trans.crop(flowF, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                validB = trans.crop(validB, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+                validF = trans.crop(validF, top=y0, left=x0, height=self.crop_size[0], width=self.crop_size[1])
+            else:
+                img1 = img1[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img2 = img2[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                img3 = img3[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowB = flowB[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                flowF = flowF[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                validB = validB[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+                validF = validF[y0:y0+self.crop_size[0], x0:x0+self.crop_size[1]]
+
+        if self.do_flip:
+            if np.random.rand() < self.h_flip_prob: # h-flip
+                # Numpy HWC -> CHW Torch
+                # Valid HW
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(2,))
+                    img2 = torch.flip(img2, dims=(2,))
+                    img3 = torch.flip(img3, dims=(2,))
+                    flowB = torch.flip(flowB, dims=(2,))
+                    flowF = torch.flip(flowF, dims=(2,))
+                    flowB[0] *= -1.0
+                    flowF[0] *= -1.0
+                    validB = torch.flip(validB, dims=(1,))
+                    validF = torch.flip(validF, dims=(1,))
+                else:
+                    img1 = img1[:, ::-1]
+                    img2 = img2[:, ::-1]
+                    img3 = img3[:, ::-1]
+                    flowB = flowB[:, ::-1] * [-1.0, 1.0]
+                    flowF = flowF[:, ::-1] * [-1.0, 1.0]
+                    validB = validB[:, ::-1]
+                    validF = validF[:, ::-1]
+
+            if np.random.rand() < self.v_flip_prob: # v-flip
+                if torch.is_tensor(img1):
+                    img1 = torch.flip(img1, dims=(1,))
+                    img2 = torch.flip(img2, dims=(1,))
+                    img3 = torch.flip(img3, dims=(1,))
+                    flowB = torch.flip(flowB, dims=(1,))
+                    flowF = torch.flip(flowF, dims=(1,))
+                    flowB[1] *= -1.0
+                    flowF[1] *= -1.0
+                    validB = torch.flip(validB, dims=(0,))
+                    validF = torch.flip(validF, dims=(0,))
+                else:
+                    img1 = img1[::-1, :]
+                    img2 = img2[::-1, :]
+                    img3 = img3[::-1, :]
+                    flowB = flowB[::-1, :] * [1.0, -1.0]
+                    flowF = flowF[::-1, :] * [1.0, -1.0]
+                    validB = validB[::-1, :]
+                    validF = validF[::-1, :]
+
+        #margin_y = 20
+        #margin_x = 50
+        #
+        #y0 = np.random.randint(0, img2.shape[0] - self.crop_size[0] + margin_y)
+        #x0 = np.random.randint(-margin_x, img2.shape[1] - self.crop_size[1] + margin_x)
+        #
+        #y0 = np.clip(y0, 0, img2.shape[0] - self.crop_size[0])
+        #x0 = np.clip(x0, 0, img2.shape[1] - self.crop_size[1])
+        # print(img1.shape)
+
+        validB = get_gt_correspondence_mask(flowB)
+        validF = get_gt_correspondence_mask(flowF)
+        return img1, img2, img3, flowB, flowF, validB, validF
+
+    # img1, img2: (H, W, 3). valid: (H, W)
+    def __call__(self, img1, img2, img3, flowB, flowF, validB, validF):
+        img1, img2, img3, flowB, flowF, validB, validF = self.spatial_transform(img1, img2, img3, flowB, flowF, validB, validF)
+        img1, img2, img3 = self.color_transform(img1, img2, img3)
+        img1, img2, img3 = self.eraser_transform(img1, img2, img3)
+
+        if self.shift_prob > 0 and random.random() < self.shift_prob:
+            valid2 = None
+            img1, img2, img3, flowB, flowF, valid2 = random_shift2(img1, img2, img3, flowB, flowF, self.shift_sigmas)
+            if valid2 is not None:
+                validB = validB * valid2
+                validF = validF * valid2
+
+        if self.blur_sigma > 0:
+            K = self.blur_kernel
+            img1 = cv2.GaussianBlur(img1, (K, K), self.blur_sigma)
+            img2 = cv2.GaussianBlur(img2, (K, K), self.blur_sigma)
+            img3 = cv2.GaussianBlur(img3, (K, K), self.blur_sigma)
+
+        if torch.is_tensor(img1):
+            img1 =   img1.contiguous()
+            img2 =   img2.contiguous()
+            img3 =   img3.contiguous()
+            flowB =  flowB.contiguous()
+            flowF =  flowF.contiguous()
+            validB = validB.contiguous()
+            validF = validF.contiguous()
+        else:
+            img1 = np.ascontiguousarray(img1)
+            img2 = np.ascontiguousarray(img2)
+            img3 = np.ascontiguousarray(img3)
+            flowB = np.ascontiguousarray(flowB)
+            flowF = np.ascontiguousarray(flowF)
+            validB = np.ascontiguousarray(validB)
+            validF = np.ascontiguousarray(validF)
+
+        return img1, img2, img3, flowB, flowF, validB, validF
