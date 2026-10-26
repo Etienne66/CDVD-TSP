@@ -1,0 +1,41 @@
+# Pre-commit scanning for the automation suite. Bandit (security, Ysh's ask via
+# Steven's video) + Pylint (lint). Install once: `pre-commit install`.
+#
+# This repo had no linter before, so there is no flake8/ruff conflict to remove —
+# Pylint is simply the linter, and no formatter is imposed (Pylint's format checks
+# are disabled in .pylintrc) to avoid a mass reformat of the existing suite.
+repos:
+    -   repo: https://github.com/pre-commit/pre-commit-hooks
+        rev: v4.6.0
+        hooks:
+            -   id: trailing-whitespace
+                files: \.(py|yaml)$
+            -   id: end-of-file-fixer
+                files: \.(py|yaml)$
+            -   id: check-yaml
+                files: \.(py|yaml)$
+            -   id: debug-statements
+
+    # Security. B101 (assert_used) skipped — asserts are the point of a test suite.
+    # Pinned to python3.11 (this repo's runtime): Bandit 1.8.0 crashes on Python
+    # 3.14 (removed ast.Num) and would then silently scan nothing while exiting 0.
+    -   repo: https://github.com/PyCQA/bandit
+        rev: 1.8.0
+        hooks:
+            -   id: bandit
+                # --severity-level high: block a commit only on HIGH-severity findings
+                # (there are none today, so this adopts with zero friction), while the
+                # existing Low/Medium items become a deliberate cleanup backlog rather
+                # than blocking unrelated commits. See the full report any time with:
+                #   bandit --skip B101 -r service
+                args: ["--skip", "B101", "--severity-level", "high"]
+                language_version: python3.11
+
+    -   repo: local
+        hooks:
+            -   id: pylint
+                name: pylint
+                entry: pylint
+                language: system
+                types: [python]
+                args: ["--rcfile=.pylintrc"]
